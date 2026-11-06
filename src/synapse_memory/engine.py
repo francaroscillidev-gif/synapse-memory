@@ -2,11 +2,12 @@ import math
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import numpy as np
 
 from synapse_memory.embedder import LocalEmbedder
+from synapse_memory.evolver import MemoryEvolver
 from synapse_memory.extractor import SmartExtractor
 from synapse_memory.models import MemoryItem, SearchResult
 from synapse_memory.storage import StorageManager
@@ -16,6 +17,7 @@ class MemoryEngine:
     def __init__(self, db_path: Optional[Path] = None, embedder: Optional[LocalEmbedder] = None):
         self.storage = StorageManager(db_path=db_path)
         self.embedder = embedder or LocalEmbedder()
+        self.evolver = MemoryEvolver(self.storage)
 
     def store(
         self,
@@ -26,8 +28,12 @@ class MemoryEngine:
         metadata: Optional[dict] = None,
         memory_id: Optional[str] = None,
         auto_enrich: bool = True,
-    ) -> MemoryItem:
-        """Store a new fact, rule, or observation into local memory."""
+        auto_evolve: bool = True,
+    ) -> Tuple[MemoryItem, List[MemoryItem]]:
+        """
+        Store a new fact, rule, or observation into local memory.
+        Returns (created_item, list_of_superseded_items).
+        """
         cleaned_content = content.strip()
         tags_set = set([t.strip().lower() for t in (tags or []) if t.strip()])
 
@@ -52,8 +58,14 @@ class MemoryEngine:
         )
 
         vector = self.embedder.embed_text(item.content)
+
+        # Detect contradictions and supersede older memories if necessary
+        superseded: List[MemoryItem] = []
+        if auto_evolve:
+            superseded = self.evolver.check_and_evolve(new_item=item, new_vector=vector)
+
         self.storage.save_memory(item, vector)
-        return item
+        return item, superseded
 
     def recall(
         self,
@@ -64,6 +76,7 @@ class MemoryEngine:
         sim_weight: float = 0.65,
         recency_weight: float = 0.20,
         importance_weight: float = 0.15,
+        active_only: bool = True,
     ) -> List[SearchResult]:
         """
         Recall memories with a combined scoring function:
@@ -71,7 +84,7 @@ class MemoryEngine:
         - Recency Decay (exponential half-life decay)
         - Explicit Importance
         """
-        all_entries = self.storage.get_all_vectors(category=category)
+        all_entries = self.storage.get_all_vectors(category=category, active_only=active_only)
         if not all_entries:
             return []
 
@@ -147,3 +160,28 @@ class MemoryEngine:
             lines.append(f"{i}. [{category}] {match.item.content}{tags}")
         lines.append("### [End Memory Context]\n")
         return "\n".join(lines)
+
+    def compact_context(self, query: str, max_approx_tokens: int = 500) -> str:
+        """
+        Retrieves matching memories while adhering strictly to a token budget.
+        Approximates ~4 characters per token.
+        """
+        matches = self.recall(query=query, limit=15)
+        if not matches:
+            return ""
+
+        char_budget = max_approx_tokens * 4
+        current_chars = 0
+        selected = []
+
+        for m in matches:
+            entry = f"- [{m.item.category.upper()}] {m.item.content}"
+            if current_chars + len(entry) + 1 > char_budget:
+                break
+            selected.append(entry)
+            current_chars += len(entry) + 1
+
+        if not selected:
+            return ""
+
+        return "### [Synapse Compact Memory Context]\n" + "\n".join(selected) + "\n### [End Context]\n"

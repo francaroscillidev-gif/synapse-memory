@@ -34,10 +34,22 @@ class StorageManager:
                     created_at TEXT NOT NULL,
                     last_accessed_at TEXT,
                     access_count INTEGER NOT NULL DEFAULT 0,
+                    is_active INTEGER NOT NULL DEFAULT 1,
+                    superseded_by TEXT,
                     metadata TEXT NOT NULL
                 )
                 """
             )
+            # Safe schema migration for existing databases
+            try:
+                conn.execute("ALTER TABLE memories ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE memories ADD COLUMN superseded_by TEXT")
+            except sqlite3.OperationalError:
+                pass
+
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS memory_embeddings (
@@ -52,6 +64,11 @@ class StorageManager:
                 CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category);
                 """
             )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_memories_active ON memories(is_active);
+                """
+            )
             conn.commit()
 
     def save_memory(self, item: MemoryItem, vector: np.ndarray) -> None:
@@ -59,8 +76,8 @@ class StorageManager:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO memories 
-                (id, content, category, tags, importance, created_at, last_accessed_at, access_count, metadata)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (id, content, category, tags, importance, created_at, last_accessed_at, access_count, is_active, superseded_by, metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     item.id,
@@ -71,6 +88,8 @@ class StorageManager:
                     item.created_at.isoformat(),
                     item.last_accessed_at.isoformat() if item.last_accessed_at else None,
                     item.access_count,
+                    1 if item.is_active else 0,
+                    item.superseded_by,
                     json.dumps(item.metadata),
                 ),
             )
@@ -98,32 +117,60 @@ class StorageManager:
             conn.commit()
             return cur.rowcount > 0
 
-    def list_memories(self, limit: int = 50, category: Optional[str] = None) -> List[MemoryItem]:
+    def supersede_memory(self, old_memory_id: str, new_memory_id: str) -> bool:
+        """Mark an older memory as superseded/inactive when an updated fact arrives."""
         with self._get_connection() as conn:
+            cur = conn.execute(
+                """
+                UPDATE memories
+                SET is_active = 0, superseded_by = ?
+                WHERE id = ?
+                """,
+                (new_memory_id, old_memory_id),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+
+    def list_memories(self, limit: int = 50, category: Optional[str] = None, active_only: bool = True) -> List[MemoryItem]:
+        with self._get_connection() as conn:
+            query = "SELECT * FROM memories"
+            clauses = []
+            params = []
+
+            if active_only:
+                clauses.append("is_active = 1")
             if category:
-                cur = conn.execute(
-                    "SELECT * FROM memories WHERE category = ? ORDER BY created_at DESC LIMIT ?",
-                    (category, limit),
-                )
-            else:
-                cur = conn.execute(
-                    "SELECT * FROM memories ORDER BY created_at DESC LIMIT ?",
-                    (limit,),
-                )
+                clauses.append("category = ?")
+                params.append(category)
+
+            if clauses:
+                query += " WHERE " + " AND ".join(clauses)
+
+            query += " ORDER BY created_at DESC LIMIT ?"
+            params.append(limit)
+
+            cur = conn.execute(query, params)
             return [self._row_to_memory(row) for row in cur.fetchall()]
 
-    def get_all_vectors(self, category: Optional[str] = None) -> List[Tuple[MemoryItem, np.ndarray]]:
-        """Fetch all memories and their embeddings for ranking calculations."""
+    def get_all_vectors(self, category: Optional[str] = None, active_only: bool = True) -> List[Tuple[MemoryItem, np.ndarray]]:
+        """Fetch memories and their embeddings for ranking calculations."""
         with self._get_connection() as conn:
             query = """
                 SELECT m.*, e.embedding 
                 FROM memories m
                 JOIN memory_embeddings e ON m.id = e.memory_id
             """
+            clauses = []
             params = []
+
+            if active_only:
+                clauses.append("m.is_active = 1")
             if category:
-                query += " WHERE m.category = ?"
+                clauses.append("m.category = ?")
                 params.append(category)
+
+            if clauses:
+                query += " WHERE " + " AND ".join(clauses)
 
             cur = conn.execute(query, params)
             results = []
@@ -149,6 +196,11 @@ class StorageManager:
             conn.commit()
 
     def _row_to_memory(self, row: sqlite3.Row) -> MemoryItem:
+        # Check if is_active exists in row
+        keys = row.keys()
+        is_active = bool(row["is_active"]) if "is_active" in keys else True
+        superseded_by = row["superseded_by"] if "superseded_by" in keys else None
+
         return MemoryItem(
             id=row["id"],
             content=row["content"],
@@ -158,5 +210,7 @@ class StorageManager:
             created_at=datetime.fromisoformat(row["created_at"]),
             last_accessed_at=datetime.fromisoformat(row["last_accessed_at"]) if row["last_accessed_at"] else None,
             access_count=int(row["access_count"]),
+            is_active=is_active,
+            superseded_by=superseded_by,
             metadata=json.loads(row["metadata"]),
         )

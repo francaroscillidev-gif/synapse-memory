@@ -1,3 +1,4 @@
+import time
 from typing import List, Optional
 import typer
 from rich.console import Console
@@ -25,21 +26,28 @@ def remember(
 ):
     """Save a new memory locally with automatic semantic embedding."""
     with console.status("[bold cyan]Encoding and storing memory...[/bold cyan]"):
-        item = engine.store(
+        item, superseded = engine.store(
             content=content,
             category=category,
             tags=tags or [],
             importance=importance,
         )
 
+    msg = (
+        f"[bold green]✔ Memory Preserved![/bold green]\n"
+        f"[bold]ID:[/bold] {item.id}\n"
+        f"[bold]Category:[/bold] {item.category}\n"
+        f"[bold]Importance:[/bold] {item.importance}\n"
+        f"[bold]Tags:[/bold] {', '.join(item.tags) if item.tags else 'None'}\n"
+        f"[bold]Content:[/bold] {item.content}"
+    )
+    if superseded:
+        old_ids = ", ".join([f"[yellow]{s.id}[/yellow]" for s in superseded])
+        msg += f"\n\n[bold yellow]⚡ Memory Evolution:[/bold yellow] This memory superseded/updated older conflicting memory: {old_ids}"
+
     console.print(
         Panel.fit(
-            f"[bold green]✔ Memory Preserved![/bold green]\n"
-            f"[bold]ID:[/bold] {item.id}\n"
-            f"[bold]Category:[/bold] {item.category}\n"
-            f"[bold]Importance:[/bold] {item.importance}\n"
-            f"[bold]Tags:[/bold] {', '.join(item.tags) if item.tags else 'None'}\n"
-            f"[bold]Content:[/bold] {item.content}",
+            msg,
             title="🧠 Synapse Memory",
             border_style="green",
         )
@@ -218,6 +226,43 @@ def import_memories(
     with console.status("[bold cyan]Restoring memories from backup...[/bold cyan]"):
         count = manager.import_json(inp)
     console.print(f"[bold green]✔ Successfully restored {count} memories from '{inp.name}'[/bold green]")
+
+
+@app.command(name="compact")
+def compact_context(
+    query: str = typer.Argument(..., help="Query to generate compressed context for"),
+    tokens: int = typer.Option(400, "--tokens", "-t", help="Target token budget"),
+):
+    """Generate compressed memory context strictly adhering to a token budget."""
+    block = engine.compact_context(query=query, max_approx_tokens=tokens)
+    if not block:
+        console.print("[dim]No matching memories to compact.[/dim]")
+    else:
+        console.print(Panel(block, title=f"⚡ Compact Memory Context (~{tokens} Tokens)", border_style="cyan"))
+
+
+@app.command(name="watch")
+def watch_directory(
+    path: str = typer.Argument(..., help="Directory path to watch"),
+    interval: float = typer.Option(2.0, "--interval", "-i", help="Scan interval in seconds"),
+    glob_pattern: str = typer.Option("**/*.md", "--glob", "-g", help="Glob pattern for files"),
+):
+    """Continuously watch a directory and auto-sync modified files into memory."""
+    from pathlib import Path
+    from synapse_memory.watcher import DirectoryWatcher
+
+    dir_path = Path(path).resolve()
+    if not dir_path.is_dir():
+        console.print(f"[bold red]✘ Not a directory:[/bold red] {dir_path}")
+        raise typer.Exit(1)
+
+    watcher = DirectoryWatcher(engine, dir_path=dir_path, glob_pattern=glob_pattern)
+    console.print(f"[bold cyan]👀 Starting Synapse Watcher on '{dir_path}'...[/bold cyan]")
+    
+    def on_change(count: int):
+        console.print(f"[bold green]✔ Auto-synced {count} updated file(s) into memory at {time.strftime('%H:%M:%S')}[/bold green]")
+
+    watcher.start_watching(interval_seconds=interval, on_change=on_change)
 
 
 def main():

@@ -12,6 +12,8 @@ class MemoryItem(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     last_accessed_at: Optional[datetime] = None
     access_count: int = 0
+    is_active: bool = Field(default=True, description="Whether this memory is currently active or superseded")
+    superseded_by: Optional[str] = Field(default=None, description="ID of memory that replaced this one")
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 

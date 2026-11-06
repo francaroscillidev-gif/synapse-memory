@@ -441,13 +441,15 @@ async def api_remember(request):
     tags = data.get("tags", [])
     importance = float(data.get("importance", 0.5))
 
-    item = engine.store(
+    item, superseded = engine.store(
         content=content,
         category=category,
         tags=tags,
         importance=importance,
     )
-    return JSONResponse(item.model_dump(mode="json"))
+    result = item.model_dump(mode="json")
+    result["superseded"] = [s.model_dump(mode="json") for s in superseded]
+    return JSONResponse(result)
 
 
 async def api_recall(request):

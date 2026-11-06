@@ -20,8 +20,11 @@ Most modern AI agents suffer from **"Context Amnesia"**: they lose personal pref
    - **Semantic Similarity** (dense vector cosine distance)
    - **Ebbinghaus Forgetting Curve / Recency Decay** (frequently recalled facts stay fresh)
    - **Explicit Importance & Tag Weighting** (critical architectural rules outrank casual facts)
-3. **Universal MCP Server:** Integrates natively with any Model Context Protocol (MCP) host, such as **Claude Desktop**, **Cursor**, **Antigravity**, or custom agent loops.
-4. **Instant Terminal CLI:** Intuitive commands for humans and shell scripts.
+3. **Memory Evolution & Self-Correction:** Automatically detects when a new memory contradicts or supersedes an older rule (e.g. *"switched from Postgres to CockroachDB"*), deprecating the outdated memory to eliminate AI hallucination.
+4. **Token Budget Compressor:** Compresses recalled knowledge to strictly respect context window limits.
+5. **Real-Time Directory Watcher:** Watches note folders or repositories and auto-syncs modified files into memory using SHA256 diffing.
+6. **Universal MCP Server:** Integrates natively with any Model Context Protocol (MCP) host, such as **Claude Desktop**, **Cursor**, **Antigravity**, or custom agent loops.
+7. **Instant Terminal CLI & Web Graph Dashboard:** Rich CLI + real-time force-directed interactive knowledge graph.
 
 ---
 
@@ -108,6 +111,18 @@ Launch the local dark-mode dashboard with interactive force-directed graph view:
 ```bash
 synapse ui
 # Opens http://127.0.0.1:8484
+```
+
+### Compress Context within a Token Budget (`compact`)
+Extract only the highest-ranking memories compressed to fit within your prompt token budget:
+```bash
+synapse compact "database guidelines" --tokens 300
+```
+
+### Continuous Folder Sync Daemon (`watch`)
+Monitor a folder of markdown files or personal notes and auto-sync changes into memory:
+```bash
+synapse watch ./notes --interval 2.0
 ```
 
 ### Forget / Delete Memory (`forget`)

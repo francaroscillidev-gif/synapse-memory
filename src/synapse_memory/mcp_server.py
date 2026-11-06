@@ -16,13 +16,26 @@ def remember(
     importance: float = 0.5,
 ) -> str:
     """Store a new fact, user preference, instruction, or knowledge in persistent local memory."""
-    item = engine.store(
+    item, superseded = engine.store(
         content=content,
         category=category,
         tags=tags or [],
         importance=importance,
     )
-    return f"Successfully stored memory [{item.id}] in category '{item.category}':\n\"{item.content}\""
+    msg = f"Successfully stored memory [{item.id}] in category '{item.category}':\n\"{item.content}\""
+    if superseded:
+        old_ids = ", ".join([f"[{s.id}]" for s in superseded])
+        msg += f"\n\nNote: This memory superseded/updated older conflicting memory: {old_ids}"
+    return msg
+
+
+@mcp_app.tool()
+def compact_prompt(
+    query: str,
+    max_tokens: int = 400,
+) -> str:
+    """Retrieve long-term memory context formatted and compressed to fit within a token budget."""
+    return engine.compact_context(query=query, max_approx_tokens=max_tokens)
 
 
 @mcp_app.tool()

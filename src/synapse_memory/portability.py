@@ -1,4 +1,5 @@
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
@@ -43,6 +44,7 @@ class PortabilityManager:
             self.engine.store(
                 content=content,
                 category=m.get("category", "general"),
+                workspace=m.get("workspace", "default"),
                 tags=m.get("tags", []),
                 importance=float(m.get("importance", 0.5)),
                 memory_id=m.get("id"),
@@ -75,7 +77,7 @@ class PortabilityManager:
             lines.append("")
             for m in mems:
                 tags = " ".join([f"#{t}" for t in m.tags])
-                lines.append(f"- **[{m.id}]** (Priority: {int(m.importance*100)}%) {tags}")
+                lines.append(f"- **[{m.id}]** (Workspace: `{m.workspace}`) (Priority: {int(m.importance*100)}%) {tags}")
                 lines.append(f"  > {m.content}")
                 lines.append("")
             lines.append("---")
@@ -83,4 +85,46 @@ class PortabilityManager:
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text("\n".join(lines), encoding="utf-8")
+        return len(items)
+
+    def export_obsidian_vault(self, vault_dir: Path) -> int:
+        """
+        Export memories as an interconnected Obsidian vault where each memory
+        is a markdown file with YAML frontmatter, wikilinks, and bidirectional graph connections.
+        """
+        items = self.engine.storage.list_memories(limit=10000)
+        vault_dir.mkdir(parents=True, exist_ok=True)
+
+        for it in items:
+            # Clean safe filename from ID and first few words
+            title_slug = re.sub(r"[^\w\-_]", "_", it.content[:30]).strip("_")
+            filename = f"{it.id}_{title_slug}.md"
+            file_path = vault_dir / filename
+
+            # Build Obsidian note with YAML Frontmatter
+            tags_yaml = "\n".join([f"  - {t}" for t in it.tags]) if it.tags else "  - general"
+            wikilinks = "\n".join([f"- [[{t}]]" for t in it.tags]) if it.tags else ""
+            category_link = f"[[Category_{it.category.capitalize()}]]"
+            workspace_link = f"[[Workspace_{it.workspace.capitalize()}]]"
+
+            note_content = f"""---
+id: {it.id}
+workspace: {it.workspace}
+category: {it.category}
+importance: {it.importance}
+created_at: {it.created_at.isoformat()}
+tags:
+{tags_yaml}
+---
+
+# {it.id}
+
+{it.content}
+
+## Connections
+- Context: {workspace_link} | {category_link}
+{wikilinks}
+"""
+            file_path.write_text(note_content, encoding="utf-8")
+
         return len(items)

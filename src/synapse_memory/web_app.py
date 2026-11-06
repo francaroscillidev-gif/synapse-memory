@@ -38,7 +38,13 @@ HTML_DASHBOARD = """<!DOCTYPE html>
         <p class="text-sm text-gray-400 mt-1">Cognitive Long-Term Memory & Knowledge Graph for Autonomous Agents</p>
       </div>
       <div class="flex items-center space-x-3">
-        <button onclick="refreshAll()" class="px-4 py-2 text-xs font-medium rounded-lg glass hover:bg-gray-800 text-gray-200 transition">↻ Refresh</button>
+        <div class="flex items-center space-x-1.5">
+          <span class="text-xs text-gray-400">Workspace:</span>
+          <select id="activeWs" onchange="changeWorkspace()" class="px-2.5 py-1.5 text-xs rounded-lg glass bg-gray-900 border border-cyan-800/80 text-cyan-300 font-semibold focus:outline-none cursor-pointer">
+            <option value="">All Workspaces</option>
+          </select>
+        </div>
+        <button onclick="refreshAll()" class="px-3 py-1.5 text-xs font-medium rounded-lg glass hover:bg-gray-800 text-gray-200 transition">↻ Refresh</button>
       </div>
     </header>
 
@@ -169,8 +175,24 @@ HTML_DASHBOARD = """<!DOCTYPE html>
   <script>
     let currentMemories = [];
 
+    let selectedWorkspace = "";
+
+    async function loadWorkspaces() {
+      const res = await fetch('/api/workspaces');
+      const wsList = await res.json();
+      const select = document.getElementById('activeWs');
+      select.innerHTML = '<option value="">All Workspaces</option>' + wsList.map(ws => `<option value="${escapeHtml(ws)}">${escapeHtml(ws)}</option>`).join('');
+      if (selectedWorkspace) select.value = selectedWorkspace;
+    }
+
+    function changeWorkspace() {
+      selectedWorkspace = document.getElementById('activeWs').value;
+      fetchMemories();
+    }
+
     async function fetchMemories() {
-      const res = await fetch('/api/memories');
+      const url = selectedWorkspace ? `/api/memories?workspace=${encodeURIComponent(selectedWorkspace)}` : '/api/memories';
+      const res = await fetch(url);
       const data = await res.json();
       currentMemories = data;
       const feed = document.getElementById('feedView');
@@ -487,6 +509,7 @@ HTML_DASHBOARD = """<!DOCTYPE html>
       };
     }
 
+    loadWorkspaces();
     fetchMemories();
   </script>
 </body>
@@ -501,8 +524,14 @@ async def get_dashboard(request):
 async def api_list_memories(request):
     limit = int(request.query_params.get("limit", 100))
     category = request.query_params.get("category")
-    items = engine.storage.list_memories(limit=limit, category=category)
+    workspace = request.query_params.get("workspace")
+    items = engine.storage.list_memories(limit=limit, category=category, workspace=workspace)
     return JSONResponse([it.model_dump(mode="json") for it in items])
+
+
+async def api_workspaces(request):
+    ws_list = engine.storage.list_workspaces()
+    return JSONResponse(ws_list)
 
 
 async def api_remember(request):
@@ -512,12 +541,14 @@ async def api_remember(request):
         return JSONResponse({"error": "Content is required"}, status_code=400)
 
     category = data.get("category", "general")
+    workspace = data.get("workspace", "default")
     tags = data.get("tags", [])
     importance = float(data.get("importance", 0.5))
 
     item, superseded = engine.store(
         content=content,
         category=category,
+        workspace=workspace,
         tags=tags,
         importance=importance,
     )
@@ -533,9 +564,11 @@ async def api_recall(request):
         return JSONResponse({"error": "Query is required"}, status_code=400)
 
     category = data.get("category")
+    workspace = data.get("workspace")
     limit = int(data.get("limit", 5))
 
-    results = engine.recall(query=query, category=category, limit=limit)
+    results = engine.recall(query=query, category=category, workspace=workspace, limit=limit)
+    return JSONResponse([r.model_dump(mode="json") for r in results])
     return JSONResponse([r.model_dump(mode="json") for r in results])
 
 
@@ -604,6 +637,7 @@ async def api_prune(request):
 routes = [
     Route("/", endpoint=get_dashboard, methods=["GET"]),
     Route("/api/memories", endpoint=api_list_memories, methods=["GET"]),
+    Route("/api/workspaces", endpoint=api_workspaces, methods=["GET"]),
     Route("/api/remember", endpoint=api_remember, methods=["POST"]),
     Route("/api/recall", endpoint=api_recall, methods=["POST"]),
     Route("/api/memories/{id}", endpoint=api_delete_memory, methods=["DELETE"]),

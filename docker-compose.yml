@@ -1,0 +1,15 @@
+services:
+  synapse-memory:
+    build: .
+    container_name: synapse-memory
+    restart: unless-stopped
+    ports:
+      - "8484:8484"
+    volumes:
+      - synapse-data:/data
+    environment:
+      - SYNAPSE_DB_PATH=/data/memories.db
+
+volumes:
+  synapse-data:
+    name: synapse-data

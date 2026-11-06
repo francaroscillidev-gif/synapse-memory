@@ -217,14 +217,22 @@ def ingest(
 @app.command(name="export")
 def export_memories(
     output_path: str = typer.Option("synapse_backup.json", "--out", "-o", help="Output file path (.json or .md)"),
+    obsidian_vault: Optional[str] = typer.Option(None, "--obsidian", help="Export as Obsidian vault folder with wikilinks"),
 ):
-    """Export all memories to a portable JSON backup or Markdown notes file."""
+    """Export all memories to JSON backup, single Markdown file, or interconnected Obsidian Vault."""
     from pathlib import Path
     from synapse_memory.portability import PortabilityManager
 
-    out = Path(output_path).resolve()
     manager = PortabilityManager(engine)
 
+    if obsidian_vault:
+        vault_path = Path(obsidian_vault).resolve()
+        with console.status(f"[bold cyan]Exporting Obsidian Vault to {vault_path}...[/bold cyan]"):
+            count = manager.export_obsidian_vault(vault_path)
+        console.print(f"[bold green]✔ Exported {count} notes with bidirectional graph links to Obsidian Vault:[/bold green] {vault_path}")
+        return
+
+    out = Path(output_path).resolve()
     if out.suffix == ".md":
         count = manager.export_markdown(out)
         console.print(f"[bold green]✔ Exported {count} memories to Markdown:[/bold green] {out}")
@@ -365,6 +373,28 @@ def consolidate(
         console.print(f"[yellow]Not enough memories in '{category}' to consolidate (minimum 2 needed).[/yellow]")
     else:
         console.print(Panel(summary, title=f"🧠 Consolidated Summary: {category.upper()}", border_style="green"))
+
+
+@app.command(name="shell-sync")
+def shell_sync(
+    max_commands: int = typer.Option(40, "--max", "-m", help="Maximum commands to index"),
+    history_file: Optional[str] = typer.Option(None, "--file", "-f", help="Custom history file path"),
+):
+    """Index high-value developer terminal commands into the 'terminal' workspace."""
+    from pathlib import Path
+    from synapse_memory.shell_sync import ShellHistorySync
+
+    syncer = ShellHistorySync(engine)
+    h_path = Path(history_file).resolve() if history_file else None
+
+    with console.status("[bold cyan]Scanning shell history for high-value commands...[/bold cyan]"):
+        count = syncer.sync_history(history_file=h_path, max_entries=max_commands)
+
+    if count > 0:
+        console.print(f"[bold green]✔ Synchronized {count} shell commands into workspace 'terminal'![/bold green]")
+        console.print("[dim]Recall them anytime with: `synapse recall 'docker command' --workspace terminal`[/dim]")
+    else:
+        console.print("[yellow]No new or substantial shell commands found to index.[/yellow]")
 
 
 def main():

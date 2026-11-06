@@ -118,6 +118,25 @@ synapse export --out notes.md
 synapse import backup.json
 ```
 
+### Export & Backup (`export` / `import`)
+Export all memories to portable JSON, single Markdown notes, or an interconnected Obsidian Vault:
+```bash
+# Export to JSON backup
+synapse export --out backup.json
+
+# Export as an interconnected Obsidian Vault with [[wikilinks]]
+synapse export --obsidian ~/Documents/ObsidianVault/SynapseMemory
+
+# Restore / merge from backup
+synapse import backup.json
+```
+
+### Sync Shell & Terminal Commands (`shell-sync`)
+Index high-value developer shell commands into the `terminal` workspace:
+```bash
+synapse shell-sync --max 50
+```
+
 ### 1-Click MCP Setup for Claude & Cursor (`setup`)
 Configure Claude Desktop or Cursor automatically with a single command:
 ```bash
@@ -230,6 +249,17 @@ prompt_context = engine.format_context_for_prompt("How should I answer this user
 system_prompt = f"""You are a helpful coding assistant.
 {prompt_context}
 """
+```
+
+---
+
+## 🐳 Docker Deployment
+
+Run Synapse Web Dashboard and REST API inside a persistent container:
+
+```bash
+docker compose up -d
+# Accessible at http://localhost:8484
 ```
 
 ---

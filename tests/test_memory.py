@@ -236,3 +236,46 @@ def test_fts_hybrid_search(temp_engine):
     assert len(results) > 0
     assert "v9.8.7-beta" in results[0].item.content
     assert "fts=match" in results[0].rationale
+
+
+def test_export_obsidian_vault(temp_engine, tmp_path):
+    from synapse_memory.portability import PortabilityManager
+
+    temp_engine.store(content="Obsidian graph connection test note", category="notes", tags=["graph", "obsidian"])
+    manager = PortabilityManager(temp_engine)
+    vault_dir = tmp_path / "test_vault"
+
+    count = manager.export_obsidian_vault(vault_dir)
+    assert count >= 1
+    files = list(vault_dir.glob("*.md"))
+    assert len(files) >= 1
+    content = files[0].read_text()
+    assert "[[" in content
+    assert "tags:" in content
+
+
+def test_shell_history_sync(temp_engine, tmp_path):
+    from synapse_memory.shell_sync import ShellHistorySync
+
+    history_file = tmp_path / ".zsh_history"
+    history_file.write_text(
+        ": 1629839281:0;ls\n"
+        ": 1629839282:0;docker run -d -p 8080:80 --name my-web nginx:alpine\n"
+        ": 1629839283:0;kubectl get pods -n kube-system -o wide\n"
+        ": 1629839284:0;pwd\n"
+    )
+
+    syncer = ShellHistorySync(temp_engine)
+    synced_count = syncer.sync_history(history_file=history_file, max_entries=10)
+    assert synced_count == 2  # Only the docker and kubectl commands
+
+    results = temp_engine.recall("nginx", workspace="terminal")
+    assert len(results) > 0
+    assert "docker run" in results[0].item.content
+
+
+def test_api_workspaces_endpoint():
+    client = TestClient(app)
+    r = client.get("/api/workspaces")
+    assert r.status_code == 200
+    assert isinstance(r.json(), list)

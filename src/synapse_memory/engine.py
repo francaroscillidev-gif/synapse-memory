@@ -24,6 +24,7 @@ class MemoryEngine:
         self,
         content: str,
         category: str = "general",
+        workspace: str = "default",
         tags: Optional[List[str]] = None,
         importance: float = 0.5,
         metadata: Optional[dict] = None,
@@ -58,6 +59,7 @@ class MemoryEngine:
             id=item_id,
             content=cleaned_content,
             category=category.strip().lower(),
+            workspace=workspace.strip().lower(),
             tags=sorted(list(tags_set)),
             importance=max(0.0, min(1.0, importance)),
             created_at=datetime.now(timezone.utc),
@@ -78,6 +80,7 @@ class MemoryEngine:
         self,
         query: str,
         category: Optional[str] = None,
+        workspace: Optional[str] = None,
         limit: int = 5,
         min_score: float = 0.25,
         sim_weight: float = 0.65,
@@ -87,13 +90,17 @@ class MemoryEngine:
     ) -> List[SearchResult]:
         """
         Recall memories with a combined scoring function:
-        - Semantic Similarity (via Local ONNX embeddings)
+        - Dense Semantic Similarity (via Local ONNX embeddings)
+        - Sparse BM25 Keyword Search (via SQLite FTS5)
         - Recency Decay (exponential half-life decay)
         - Explicit Importance
         """
-        all_entries = self.storage.get_all_vectors(category=category, active_only=active_only)
+        all_entries = self.storage.get_all_vectors(category=category, workspace=workspace, active_only=active_only)
         if not all_entries:
             return []
+
+        # Sparse keyword search IDs via FTS5
+        fts_hits = set(self.storage.search_fts_ids(query, workspace=workspace, limit=limit * 2))
 
         query_vec = self.embedder.embed_text(query)
         now = datetime.now(timezone.utc)
@@ -107,6 +114,10 @@ class MemoryEngine:
             # Normalizziamo su scala 0..1
             sim_score = max(0.0, (cosine_sim + 1.0) / 2.0)
 
+            # BM25 / FTS5 exact keyword hit boost
+            fts_boost = 0.12 if item.id in fts_hits else 0.0
+            sim_score = min(1.0, sim_score + fts_boost)
+
             # Keyword tag boost (se i tag sono menzionati esplicitamente nella query)
             tag_hits = sum(1 for t in item.tags if t in query_lower)
             if tag_hits > 0:
@@ -117,7 +128,6 @@ class MemoryEngine:
             if ref_date.tzinfo is None:
                 ref_date = ref_date.replace(tzinfo=timezone.utc)
             delta_days = max(0.0, (now - ref_date).total_seconds() / 86400.0)
-            # Mezza vita = 14 giorni
             recency_score = math.exp(-delta_days / 14.0)
 
             # 3. Importanza
@@ -131,8 +141,9 @@ class MemoryEngine:
             )
 
             if final_score >= min_score:
+                fts_note = ", fts=match" if item.id in fts_hits else ""
                 rationale = (
-                    f"sim={sim_score:.2f}, recency={recency_score:.2f}, imp={imp_score:.2f}"
+                    f"sim={sim_score:.2f}, recency={recency_score:.2f}, imp={imp_score:.2f}{fts_note}"
                 )
                 results.append(
                     SearchResult(
@@ -154,9 +165,9 @@ class MemoryEngine:
 
         return top_results
 
-    def format_context_for_prompt(self, query: str, limit: int = 5) -> str:
+    def format_context_for_prompt(self, query: str, workspace: Optional[str] = None, limit: int = 5) -> str:
         """Returns a ready-to-inject Markdown context block for any AI prompt."""
-        matches = self.recall(query=query, limit=limit)
+        matches = self.recall(query=query, workspace=workspace, limit=limit)
         if not matches:
             return ""
 
@@ -168,12 +179,12 @@ class MemoryEngine:
         lines.append("### [End Memory Context]\n")
         return "\n".join(lines)
 
-    def compact_context(self, query: str, max_approx_tokens: int = 500) -> str:
+    def compact_context(self, query: str, workspace: Optional[str] = None, max_approx_tokens: int = 500) -> str:
         """
         Retrieves matching memories while adhering strictly to a token budget.
         Approximates ~4 characters per token.
         """
-        matches = self.recall(query=query, limit=15)
+        matches = self.recall(query=query, workspace=workspace, limit=15)
         if not matches:
             return ""
 

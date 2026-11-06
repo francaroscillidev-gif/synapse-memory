@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Synapse Memory</title>
+  <style>
+    body {
+      width: 320px;
+      margin: 0;
+      padding: 16px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0b0f19;
+      color: #f3f4f6;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+      border-bottom: 1px solid #1f2937;
+      padding-bottom: 8px;
+    }
+    .title {
+      font-weight: 700;
+      font-size: 14px;
+      color: #38bdf8;
+    }
+    .status {
+      font-size: 11px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 12px;
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #ef4444;
+    }
+    .dot.online { background: #10b981; }
+    textarea {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 8px;
+      background: #111827;
+      border: 1px solid #374151;
+      border-radius: 8px;
+      color: #fff;
+      font-size: 12px;
+      resize: vertical;
+      min-height: 70px;
+      margin-bottom: 10px;
+    }
+    button {
+      width: 100%;
+      padding: 8px;
+      background: #0284c7;
+      border: none;
+      border-radius: 6px;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    button:hover { background: #0369a1; }
+    .footer-link {
+      margin-top: 10px;
+      text-align: center;
+      font-size: 11px;
+    }
+    .footer-link a {
+      color: #38bdf8;
+      text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <span style="font-size: 18px;">🧠</span>
+    <span class="title">Synapse Memory Clipper</span>
+  </div>
+  
+  <div class="status">
+    <div id="statusDot" class="dot"></div>
+    <span id="statusText">Checking local connection...</span>
+  </div>
+
+  <textarea id="quickNote" placeholder="Type quick thought or instruction to remember..."></textarea>
+  <button id="btnSave">Save to Synapse</button>
+
+  <div class="footer-link">
+    <a href="http://127.0.0.1:8484" target="_blank">Open Synapse Dashboard ↗</a>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

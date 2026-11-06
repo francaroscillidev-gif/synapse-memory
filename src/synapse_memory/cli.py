@@ -21,6 +21,7 @@ engine = MemoryEngine()
 def remember(
     content: str = typer.Argument(..., help="The fact, note, or observation to remember"),
     category: str = typer.Option("general", "--category", "-c", help="Category (e.g. preference, code, fact)"),
+    workspace: str = typer.Option("default", "--workspace", "-w", help="Workspace namespace (e.g. work, personal, mobile)"),
     tags: Optional[List[str]] = typer.Option(None, "--tag", "-t", help="Tags/entities linked to this memory"),
     importance: float = typer.Option(0.5, "--importance", "-i", help="Importance score (0.0 to 1.0)"),
 ):
@@ -29,6 +30,7 @@ def remember(
         item, superseded = engine.store(
             content=content,
             category=category,
+            workspace=workspace,
             tags=tags or [],
             importance=importance,
         )
@@ -36,6 +38,7 @@ def remember(
     msg = (
         f"[bold green]✔ Memory Preserved![/bold green]\n"
         f"[bold]ID:[/bold] {item.id}\n"
+        f"[bold]Workspace:[/bold] {item.workspace}\n"
         f"[bold]Category:[/bold] {item.category}\n"
         f"[bold]Importance:[/bold] {item.importance}\n"
         f"[bold]Tags:[/bold] {', '.join(item.tags) if item.tags else 'None'}\n"
@@ -58,20 +61,22 @@ def remember(
 def recall(
     query: str = typer.Argument(..., help="Natural language query to search"),
     category: Optional[str] = typer.Option(None, "--category", "-c", help="Filter by category"),
+    workspace: Optional[str] = typer.Option(None, "--workspace", "-w", help="Filter by workspace namespace"),
     limit: int = typer.Option(5, "--limit", "-l", help="Number of items to retrieve"),
     min_score: float = typer.Option(0.2, "--min-score", help="Minimum relevance score threshold"),
 ):
     """Retrieve relevant memories using hybrid ranking (Semantic + Recency + Importance)."""
     with console.status("[bold cyan]Searching synaptic connections...[/bold cyan]"):
-        results = engine.recall(query=query, category=category, limit=limit, min_score=min_score)
+        results = engine.recall(query=query, category=category, workspace=workspace, limit=limit, min_score=min_score)
 
     if not results:
         console.print(f"[yellow]No memories found for query:[/yellow] '{query}'")
         return
 
-    table = Table(title=f"🧠 Synapse Recall: '{query}'", border_style="cyan")
+    table = Table(title=f"🧠 Synapse Recall: '{query}'" + (f" (Workspace: {workspace})" if workspace else ""), border_style="cyan")
     table.add_column("Rank", style="dim", width=4)
     table.add_column("ID", style="bold yellow", width=12)
+    table.add_column("Workspace", style="blue", width=10)
     table.add_column("Category", style="magenta", width=12)
     table.add_column("Score", style="bold green", width=8)
     table.add_column("Content", style="white")
@@ -81,6 +86,7 @@ def recall(
         table.add_row(
             str(i),
             res.item.id,
+            res.item.workspace,
             res.item.category,
             f"{res.final_score:.2f}",
             res.item.content,
@@ -93,10 +99,11 @@ def recall(
 @app.command()
 def prompt(
     query: str = typer.Argument(..., help="Query to extract LLM prompt context for"),
+    workspace: Optional[str] = typer.Option(None, "--workspace", "-w", help="Workspace filter"),
     limit: int = typer.Option(5, "--limit", "-l", help="Max memories in prompt"),
 ):
     """Format matching memories into a clean Markdown block ready for LLM System Prompts."""
-    block = engine.format_context_for_prompt(query, limit=limit)
+    block = engine.format_context_for_prompt(query, workspace=workspace, limit=limit)
     if not block:
         console.print("[dim]No relevant context found for this prompt.[/dim]")
     else:
@@ -107,15 +114,17 @@ def prompt(
 def list_all(
     limit: int = typer.Option(20, "--limit", "-l", help="Number of memories to show"),
     category: Optional[str] = typer.Option(None, "--category", "-c", help="Filter by category"),
+    workspace: Optional[str] = typer.Option(None, "--workspace", "-w", help="Filter by workspace"),
 ):
     """List recent memories stored in local SQLite database."""
-    items = engine.storage.list_memories(limit=limit, category=category)
+    items = engine.storage.list_memories(limit=limit, category=category, workspace=workspace)
     if not items:
         console.print("[yellow]Memory is currently empty. Use `synapse remember` to add some![/yellow]")
         return
 
     table = Table(title="🧠 Stored Memories", border_style="blue")
     table.add_column("ID", style="yellow", width=12)
+    table.add_column("Workspace", style="blue", width=10)
     table.add_column("Category", style="magenta", width=12)
     table.add_column("Importance", justify="right", width=10)
     table.add_column("Created", style="dim", width=19)
@@ -124,12 +133,28 @@ def list_all(
     for it in items:
         table.add_row(
             it.id,
+            it.workspace,
             it.category,
             f"{it.importance:.2f}",
             it.created_at.strftime("%Y-%m-%d %H:%M"),
             it.content,
         )
 
+    console.print(table)
+
+
+@app.command(name="workspaces")
+def list_workspaces_cli():
+    """List all active workspace namespaces in memory."""
+    ws_list = engine.storage.list_workspaces()
+    if not ws_list:
+        console.print("[dim]No workspaces found (default is empty).[/dim]")
+        return
+
+    table = Table(title="📁 Synapse Workspaces", border_style="cyan")
+    table.add_column("Workspace Name", style="bold green")
+    for ws in ws_list:
+        table.add_row(ws)
     console.print(table)
 
 

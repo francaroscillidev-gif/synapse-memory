@@ -16,18 +16,16 @@ Most modern AI agents suffer from **"Context Amnesia"**: they lose personal pref
 **Synapse** provides a **Local-First Episodic & Semantic Memory** with zero cloud leaks:
 
 1. **100% Private & Local:** Runs entirely on your local machine using embedded ONNX models (via FastEmbed) and SQLite. No API keys, no external database servers, no data leakage.
-2. **Hybrid Cognitive Ranking:** Combines:
-   - **Semantic Similarity** (dense vector cosine distance)
-   - **Ebbinghaus Forgetting Curve / Recency Decay** (frequently recalled facts stay fresh)
-   - **Explicit Importance & Tag Weighting** (critical architectural rules outrank casual facts)
-3. **Memory Evolution & Self-Correction:** Automatically detects when a new memory contradicts or supersedes an older rule (e.g. *"switched from Postgres to CockroachDB"*), deprecating the outdated memory to eliminate AI hallucination.
-4. **Token Budget Compressor:** Compresses recalled knowledge to strictly respect context window limits.
-5. **Real-Time Directory Watcher:** Watches note folders or repositories and auto-syncs modified files into memory using SHA256 diffing.
-6. **Universal MCP Server:** Integrates natively with any Model Context Protocol (MCP) host, such as **Claude Desktop**, **Cursor**, **Antigravity**, or custom agent loops.
-7. **Automatic PII & Secrets Redaction:** Scans and sanitizes API keys (`sk-...`, `ghp_...`), JWTs, AWS credentials, and passwords before indexing to avoid leaks.
-8. **1-Click MCP Setup:** Automated auto-injection for Claude Desktop and Cursor.
-9. **Memory Health & Consolidation:** Live analytics, garbage collection, and local Ollama-powered knowledge synthesis.
-10. **Instant Terminal CLI & Web Graph Dashboard:** Rich CLI + real-time force-directed interactive knowledge graph.
+2. **Hybrid Cognitive Search:** Combines dense ONNX vector cosine distance with sparse SQLite FTS5 (BM25) full-text indexing, recency decay, and explicit importance ranking.
+3. **Multi-Workspace Namespacing:** Isolate memories by project, domain, or agent (e.g. `--workspace mobile`, `--workspace backend`).
+4. **Official Web Browser Extension (MV3):** Highlight text or code anywhere on the web to clip it directly into your local Synapse memory.
+5. **Memory Evolution & Self-Correction:** Automatically detects when a new memory contradicts or supersedes an older rule (e.g. *"switched from Postgres to CockroachDB"*), deprecating the outdated memory to eliminate AI hallucination.
+6. **Token Budget Compressor:** Compresses recalled knowledge to strictly respect context window limits.
+7. **Real-Time Directory Watcher:** Watches note folders or repositories and auto-syncs modified files into memory using SHA256 diffing.
+8. **Universal MCP Server:** Integrates natively with any Model Context Protocol (MCP) host, such as **Claude Desktop**, **Cursor**, **Antigravity**, or custom agent loops.
+9. **Automatic PII & Secrets Redaction:** Scans and sanitizes API keys (`sk-...`, `ghp_...`), JWTs, AWS credentials, and passwords before indexing to avoid leaks.
+10. **1-Click MCP Setup:** Automated auto-injection for Claude Desktop and Cursor.
+11. **Instant Terminal CLI & Web Graph Dashboard:** Rich CLI + real-time force-directed interactive knowledge graph.
 
 ---
 
@@ -54,15 +52,26 @@ pip install -e .
 
 ### Store a memory (`remember`)
 ```bash
+# Store in default workspace
 synapse remember "We use PostgreSQL for all production database schemas" \
   --category architecture \
   --tag postgres --tag database \
   --importance 0.9
+
+# Store in a dedicated workspace
+synapse remember "iOS app uses SwiftUI and SwiftData" --workspace mobile-team
 ```
 
 ### Natural Language Search (`recall`)
 ```bash
+# Search across all or specific workspace
 synapse recall "which database do we use in prod?"
+synapse recall "mobile UI patterns" --workspace mobile-team
+```
+
+### Inspect Workspaces (`workspaces`)
+```bash
+synapse workspaces
 ```
 
 Output:
@@ -157,6 +166,16 @@ synapse watch ./notes --interval 2.0
 ```bash
 synapse forget mem_7f09dc09
 ```
+
+---
+
+## 🌐 Official Web Browser Extension
+
+Clip code snippets, documentation, and articles from any website directly into Synapse:
+1. Open `chrome://extensions` (or `edge://extensions`, `brave://extensions`).
+2. Toggle on **Developer Mode**.
+3. Click **"Load unpacked"** and select the [`extension/`](extension/) directory from this repository.
+4. Highlight any text on any page -> Right click -> **"🧠 Save to Synapse Memory"**.
 
 ---
 

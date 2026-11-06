@@ -29,6 +29,7 @@ class StorageManager:
                     id TEXT PRIMARY KEY,
                     content TEXT NOT NULL,
                     category TEXT NOT NULL,
+                    workspace TEXT NOT NULL DEFAULT 'default',
                     tags TEXT NOT NULL,
                     importance REAL NOT NULL,
                     created_at TEXT NOT NULL,
@@ -49,6 +50,10 @@ class StorageManager:
                 conn.execute("ALTER TABLE memories ADD COLUMN superseded_by TEXT")
             except sqlite3.OperationalError:
                 pass
+            try:
+                conn.execute("ALTER TABLE memories ADD COLUMN workspace TEXT NOT NULL DEFAULT 'default'")
+            except sqlite3.OperationalError:
+                pass
 
             conn.execute(
                 """
@@ -59,16 +64,26 @@ class StorageManager:
                 )
                 """
             )
-            conn.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category);
-                """
-            )
-            conn.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_memories_active ON memories(is_active);
-                """
-            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_active ON memories(is_active);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_workspace ON memories(workspace);")
+
+            # Initialize FTS5 virtual table for lightning-fast BM25 keyword search
+            try:
+                conn.execute(
+                    """
+                    CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
+                        id UNINDEXED,
+                        content,
+                        tags,
+                        tokenize = 'porter unicode61'
+                    )
+                    """
+                )
+            except sqlite3.OperationalError:
+                # In case fts5 is unavailable on minimal environments
+                pass
+
             conn.commit()
 
     def save_memory(self, item: MemoryItem, vector: np.ndarray) -> None:
@@ -76,13 +91,14 @@ class StorageManager:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO memories 
-                (id, content, category, tags, importance, created_at, last_accessed_at, access_count, is_active, superseded_by, metadata)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (id, content, category, workspace, tags, importance, created_at, last_accessed_at, access_count, is_active, superseded_by, metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     item.id,
                     item.content,
                     item.category,
+                    item.workspace,
                     json.dumps(item.tags),
                     item.importance,
                     item.created_at.isoformat(),
@@ -100,6 +116,17 @@ class StorageManager:
                 """,
                 (item.id, vector.astype(np.float32).tobytes()),
             )
+
+            # Update FTS5 index
+            try:
+                conn.execute("DELETE FROM memories_fts WHERE id = ?", (item.id,))
+                conn.execute(
+                    "INSERT INTO memories_fts (id, content, tags) VALUES (?, ?, ?)",
+                    (item.id, item.content, " ".join(item.tags)),
+                )
+            except sqlite3.OperationalError:
+                pass
+
             conn.commit()
 
     def get_memory(self, memory_id: str) -> Optional[MemoryItem]:
@@ -114,6 +141,10 @@ class StorageManager:
         with self._get_connection() as conn:
             cur = conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
             conn.execute("DELETE FROM memory_embeddings WHERE memory_id = ?", (memory_id,))
+            try:
+                conn.execute("DELETE FROM memories_fts WHERE id = ?", (memory_id,))
+            except sqlite3.OperationalError:
+                pass
             conn.commit()
             return cur.rowcount > 0
 
@@ -131,10 +162,16 @@ class StorageManager:
             conn.commit()
             return cur.rowcount > 0
 
-    def prune_superseded(self) -> int:
+    def prune_superseded(self, workspace: Optional[str] = None) -> int:
         """Permanently delete all inactive/superseded memories (garbage collection)."""
         with self._get_connection() as conn:
-            cur = conn.execute("SELECT id FROM memories WHERE is_active = 0")
+            query = "SELECT id FROM memories WHERE is_active = 0"
+            params = []
+            if workspace:
+                query += " AND workspace = ?"
+                params.append(workspace)
+
+            cur = conn.execute(query, params)
             ids_to_delete = [r["id"] for r in cur.fetchall()]
             if not ids_to_delete:
                 return 0
@@ -142,38 +179,16 @@ class StorageManager:
             placeholders = ",".join("?" for _ in ids_to_delete)
             conn.execute(f"DELETE FROM memory_embeddings WHERE memory_id IN ({placeholders})", ids_to_delete)
             conn.execute(f"DELETE FROM memories WHERE id IN ({placeholders})", ids_to_delete)
+            try:
+                conn.execute(f"DELETE FROM memories_fts WHERE id IN ({placeholders})", ids_to_delete)
+            except sqlite3.OperationalError:
+                pass
             conn.commit()
             return len(ids_to_delete)
 
-    def get_analytics(self) -> Dict[str, Any]:
-        """Aggregate statistical metrics for the analytics dashboard."""
-        with self._get_connection() as conn:
-            total = conn.execute("SELECT COUNT(*) as c FROM memories").fetchone()["c"]
-            active = conn.execute("SELECT COUNT(*) as c FROM memories WHERE is_active = 1").fetchone()["c"]
-            superseded = total - active
-
-            # Category breakdown
-            cur_cat = conn.execute("SELECT category, COUNT(*) as c FROM memories GROUP BY category ORDER BY c DESC")
-            categories = {r["category"]: r["c"] for r in cur_cat.fetchall()}
-
-            # Access stats
-            most_accessed_cur = conn.execute(
-                "SELECT id, content, access_count FROM memories WHERE access_count > 0 ORDER BY access_count DESC LIMIT 5"
-            )
-            most_accessed = [
-                {"id": r["id"], "content": r["content"][:40], "access_count": r["access_count"]}
-                for r in most_accessed_cur.fetchall()
-            ]
-
-            return {
-                "total_memories": total,
-                "active_memories": active,
-                "superseded_memories": superseded,
-                "categories": categories,
-                "most_accessed": most_accessed,
-            }
-
-    def list_memories(self, limit: int = 50, category: Optional[str] = None, active_only: bool = True) -> List[MemoryItem]:
+    def list_memories(
+        self, limit: int = 50, category: Optional[str] = None, workspace: Optional[str] = None, active_only: bool = True
+    ) -> List[MemoryItem]:
         with self._get_connection() as conn:
             query = "SELECT * FROM memories"
             clauses = []
@@ -184,6 +199,9 @@ class StorageManager:
             if category:
                 clauses.append("category = ?")
                 params.append(category)
+            if workspace:
+                clauses.append("workspace = ?")
+                params.append(workspace)
 
             if clauses:
                 query += " WHERE " + " AND ".join(clauses)
@@ -194,7 +212,45 @@ class StorageManager:
             cur = conn.execute(query, params)
             return [self._row_to_memory(row) for row in cur.fetchall()]
 
-    def get_all_vectors(self, category: Optional[str] = None, active_only: bool = True) -> List[Tuple[MemoryItem, np.ndarray]]:
+    def list_workspaces(self) -> List[str]:
+        """Return all distinct workspaces currently in use."""
+        with self._get_connection() as conn:
+            cur = conn.execute("SELECT DISTINCT workspace FROM memories ORDER BY workspace ASC")
+            return [r["workspace"] for r in cur.fetchall() if r["workspace"]]
+
+    def search_fts_ids(self, query_text: str, workspace: Optional[str] = None, limit: int = 20) -> List[str]:
+        """Execute BM25 keyword search using FTS5 virtual table."""
+        # Clean query for FTS syntax
+        cleaned_words = [w for w in query_text.replace('"', ' ').replace("'", " ").split() if len(w) > 1]
+        if not cleaned_words:
+            return []
+        fts_query = " OR ".join([f'"{w}"*' for w in cleaned_words[:6]])
+
+        with self._get_connection() as conn:
+            try:
+                query = """
+                    SELECT f.id 
+                    FROM memories_fts f
+                    JOIN memories m ON f.id = m.id
+                    WHERE memories_fts MATCH ? AND m.is_active = 1
+                """
+                params = [fts_query]
+                if workspace:
+                    query += " AND m.workspace = ?"
+                    params.append(workspace)
+
+                query += " ORDER BY rank LIMIT ?"
+                params.append(limit)
+
+                cur = conn.execute(query, params)
+                return [r["id"] for r in cur.fetchall()]
+            except sqlite3.OperationalError:
+                # Fallback if FTS table is empty or error
+                return []
+
+    def get_all_vectors(
+        self, category: Optional[str] = None, workspace: Optional[str] = None, active_only: bool = True
+    ) -> List[Tuple[MemoryItem, np.ndarray]]:
         """Fetch memories and their embeddings for ranking calculations."""
         with self._get_connection() as conn:
             query = """
@@ -210,6 +266,9 @@ class StorageManager:
             if category:
                 clauses.append("m.category = ?")
                 params.append(category)
+            if workspace:
+                clauses.append("m.workspace = ?")
+                params.append(workspace)
 
             if clauses:
                 query += " WHERE " + " AND ".join(clauses)
@@ -237,16 +296,58 @@ class StorageManager:
             )
             conn.commit()
 
+    def get_analytics(self, workspace: Optional[str] = None) -> Dict[str, Any]:
+        """Aggregate statistical metrics for the analytics dashboard."""
+        with self._get_connection() as conn:
+            where_ws = " WHERE workspace = ?" if workspace else ""
+            params_ws = [workspace] if workspace else []
+
+            total = conn.execute(f"SELECT COUNT(*) as c FROM memories{where_ws}", params_ws).fetchone()["c"]
+            active_clause = " WHERE is_active = 1" + (" AND workspace = ?" if workspace else "")
+            active = conn.execute(f"SELECT COUNT(*) as c FROM memories{active_clause}", params_ws).fetchone()["c"]
+            superseded = total - active
+
+            # Category breakdown
+            cur_cat = conn.execute(
+                f"SELECT category, COUNT(*) as c FROM memories{where_ws} GROUP BY category ORDER BY c DESC",
+                params_ws,
+            )
+            categories = {r["category"]: r["c"] for r in cur_cat.fetchall()}
+
+            # Workspaces list
+            cur_ws = conn.execute("SELECT workspace, COUNT(*) as c FROM memories GROUP BY workspace")
+            workspaces = {r["workspace"]: r["c"] for r in cur_ws.fetchall()}
+
+            # Access stats
+            most_accessed_cur = conn.execute(
+                f"SELECT id, content, access_count FROM memories{where_ws} ORDER BY access_count DESC LIMIT 5",
+                params_ws,
+            )
+            most_accessed = [
+                {"id": r["id"], "content": r["content"][:40], "access_count": r["access_count"]}
+                for r in most_accessed_cur.fetchall()
+            ]
+
+            return {
+                "total_memories": total,
+                "active_memories": active,
+                "superseded_memories": superseded,
+                "categories": categories,
+                "workspaces": workspaces,
+                "most_accessed": most_accessed,
+            }
+
     def _row_to_memory(self, row: sqlite3.Row) -> MemoryItem:
-        # Check if is_active exists in row
         keys = row.keys()
         is_active = bool(row["is_active"]) if "is_active" in keys else True
         superseded_by = row["superseded_by"] if "superseded_by" in keys else None
+        workspace = row["workspace"] if "workspace" in keys else "default"
 
         return MemoryItem(
             id=row["id"],
             content=row["content"],
             category=row["category"],
+            workspace=workspace,
             tags=json.loads(row["tags"]),
             importance=float(row["importance"]),
             created_at=datetime.fromisoformat(row["created_at"]),

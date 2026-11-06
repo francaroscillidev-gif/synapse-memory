@@ -205,3 +205,34 @@ def test_consolidator(temp_engine):
     summary = consolidator.consolidate_category("tech", store_as_memory=True)
     assert summary is not None
     assert "Python" in summary or "FastAPI" in summary
+
+
+def test_workspace_isolation(temp_engine):
+    # Store item in 'project-alpha'
+    temp_engine.store(content="Alpha uses port 3000", workspace="project-alpha")
+    # Store item in 'project-beta'
+    temp_engine.store(content="Beta uses port 4000", workspace="project-beta")
+
+    # Recall in alpha only
+    alpha_results = temp_engine.recall("port number", workspace="project-alpha")
+    assert len(alpha_results) == 1
+    assert "Alpha uses port 3000" in alpha_results[0].item.content
+
+    # Recall in beta only
+    beta_results = temp_engine.recall("port number", workspace="project-beta")
+    assert len(beta_results) == 1
+    assert "Beta uses port 4000" in beta_results[0].item.content
+
+    # List workspaces
+    workspaces = temp_engine.storage.list_workspaces()
+    assert "project-alpha" in workspaces
+    assert "project-beta" in workspaces
+
+
+def test_fts_hybrid_search(temp_engine):
+    # Test exact keyword hit with specific version tag
+    temp_engine.store(content="Dependency version is v9.8.7-beta for auth-service")
+    results = temp_engine.recall("v9.8.7-beta")
+    assert len(results) > 0
+    assert "v9.8.7-beta" in results[0].item.content
+    assert "fts=match" in results[0].rationale

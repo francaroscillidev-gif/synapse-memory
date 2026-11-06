@@ -8,3 +8,10 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Local data & backups
+*.json
+*.db
+*.sqlite3
+memories.md
+!synapse-mcp.json

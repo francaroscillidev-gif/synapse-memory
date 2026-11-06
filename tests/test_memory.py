@@ -81,3 +81,55 @@ def test_web_app_endpoints():
     r = client.get("/api/memories")
     assert r.status_code == 200
     assert isinstance(r.json(), list)
+
+    # Check graph API
+    r = client.get("/api/graph")
+    assert r.status_code == 200
+    assert "nodes" in r.json()
+    assert "links" in r.json()
+
+
+def test_file_ingestion(temp_engine):
+    from synapse_memory.ingestor import FileIngestor
+
+    ingestor = FileIngestor(temp_engine)
+    sample_doc = """# Architecture Guidelines
+We use FastAPI for internal microservices with pydantic schemas.
+
+## Database Layer
+PostgreSQL is strictly required for ACID transactions and persistent state.
+"""
+    with tempfile.NamedTemporaryFile("w+", suffix=".md", delete=False) as f:
+        f.write(sample_doc)
+        f.flush()
+        f_path = Path(f.name)
+
+    try:
+        count = ingestor.ingest_file(f_path)
+        assert count >= 2
+        results = temp_engine.recall("What database is required for ACID transactions?")
+        assert len(results) > 0
+        assert "PostgreSQL" in results[0].item.content
+    finally:
+        f_path.unlink()
+
+
+def test_export_and_import(temp_engine):
+    from synapse_memory.portability import PortabilityManager
+
+    temp_engine.store(content="Critical secret rule for backup testing", category="backup")
+    manager = PortabilityManager(temp_engine)
+
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+        backup_path = Path(f.name)
+
+    try:
+        exported_count = manager.export_json(backup_path)
+        assert exported_count >= 1
+
+        # Re-importing should work without errors
+        imported_count = manager.import_json(backup_path)
+        assert imported_count == exported_count
+    finally:
+        if backup_path.exists():
+            backup_path.unlink()

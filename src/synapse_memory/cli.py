@@ -155,6 +155,71 @@ def launch_ui(
     start_server(host=host, port=port)
 
 
+@app.command(name="ingest")
+def ingest(
+    path: str = typer.Argument(..., help="Path to file or directory to ingest into memory"),
+    glob_pattern: str = typer.Option("**/*.md", "--glob", "-g", help="Glob pattern for directories"),
+):
+    """Ingest notes, Markdown files, or directories into long-term memory."""
+    from pathlib import Path
+    from synapse_memory.ingestor import FileIngestor
+
+    target_path = Path(path).resolve()
+    ingestor = FileIngestor(engine)
+
+    if not target_path.exists():
+        console.print(f"[bold red]✘ Path does not exist:[/bold red] {target_path}")
+        raise typer.Exit(1)
+
+    if target_path.is_file():
+        with console.status(f"[bold cyan]Ingesting file {target_path.name}...[/bold cyan]"):
+            count = ingestor.ingest_file(target_path)
+        console.print(f"[bold green]✔ Ingested {count} memory chunks from '{target_path.name}'[/bold green]")
+    elif target_path.is_dir():
+        with console.status(f"[bold cyan]Ingesting directory {target_path.name}...[/bold cyan]"):
+            files, chunks = ingestor.ingest_directory(target_path, glob_pattern=glob_pattern)
+        console.print(f"[bold green]✔ Ingested {chunks} chunks across {files} files[/bold green]")
+
+
+@app.command(name="export")
+def export_memories(
+    output_path: str = typer.Option("synapse_backup.json", "--out", "-o", help="Output file path (.json or .md)"),
+):
+    """Export all memories to a portable JSON backup or Markdown notes file."""
+    from pathlib import Path
+    from synapse_memory.portability import PortabilityManager
+
+    out = Path(output_path).resolve()
+    manager = PortabilityManager(engine)
+
+    if out.suffix == ".md":
+        count = manager.export_markdown(out)
+        console.print(f"[bold green]✔ Exported {count} memories to Markdown:[/bold green] {out}")
+    else:
+        count = manager.export_json(out)
+        console.print(f"[bold green]✔ Exported {count} memories to JSON backup:[/bold green] {out}")
+
+
+@app.command(name="import")
+def import_memories(
+    input_path: str = typer.Argument(..., help="Path to JSON backup file"),
+):
+    """Import memories from a previously exported JSON backup file."""
+    from pathlib import Path
+    from synapse_memory.portability import PortabilityManager
+
+    inp = Path(input_path).resolve()
+    manager = PortabilityManager(engine)
+
+    if not inp.exists():
+        console.print(f"[bold red]✘ Backup file not found:[/bold red] {inp}")
+        raise typer.Exit(1)
+
+    with console.status("[bold cyan]Restoring memories from backup...[/bold cyan]"):
+        count = manager.import_json(inp)
+    console.print(f"[bold green]✔ Successfully restored {count} memories from '{inp.name}'[/bold green]")
+
+
 def main():
     app()
 

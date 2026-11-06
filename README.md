@@ -80,8 +80,31 @@ synapse prompt "Write an API route"
 synapse list --limit 10
 ```
 
-### Launch Interactive Web Dashboard (`ui`)
-Launch the local dark-mode UI with visual memory cards and live recall testing:
+### Ingest Files and Documentation (`ingest`)
+Chunk and embed notes, Markdown files, or whole project folders:
+```bash
+# Ingest single file
+synapse ingest docs/architecture.md
+
+# Ingest all markdown files in a folder
+synapse ingest ./notes --glob "**/*.md"
+```
+
+### Export & Backup (`export` / `import`)
+Export all memories to portable JSON or Markdown notes (compatible with Obsidian/Notion):
+```bash
+# Export to JSON backup
+synapse export --out backup.json
+
+# Export to human-readable Markdown notes
+synapse export --out notes.md
+
+# Restore / merge from backup
+synapse import backup.json
+```
+
+### Launch Interactive Web Dashboard & Knowledge Graph (`ui`)
+Launch the local dark-mode dashboard with interactive force-directed graph view:
 ```bash
 synapse ui
 # Opens http://127.0.0.1:8484

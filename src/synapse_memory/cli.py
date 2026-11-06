@@ -144,6 +144,17 @@ def serve_mcp():
     run_mcp()
 
 
+@app.command(name="ui")
+def launch_ui(
+    host: str = typer.Option("127.0.0.1", "--host", "-h", help="Host address to bind to"),
+    port: int = typer.Option(8484, "--port", "-p", help="Port for the web dashboard"),
+):
+    """Launch the interactive local Web Dashboard & REST API."""
+    from synapse_memory.web_app import start_server
+    console.print(f"[bold cyan]🚀 Opening Synapse Dashboard at http://{host}:{port}[/bold cyan]")
+    start_server(host=host, port=port)
+
+
 def main():
     app()
 

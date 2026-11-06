@@ -7,6 +7,7 @@ from typing import List, Optional
 import numpy as np
 
 from synapse_memory.embedder import LocalEmbedder
+from synapse_memory.extractor import SmartExtractor
 from synapse_memory.models import MemoryItem, SearchResult
 from synapse_memory.storage import StorageManager
 
@@ -24,17 +25,27 @@ class MemoryEngine:
         importance: float = 0.5,
         metadata: Optional[dict] = None,
         memory_id: Optional[str] = None,
+        auto_enrich: bool = True,
     ) -> MemoryItem:
         """Store a new fact, rule, or observation into local memory."""
-        tags = tags or []
+        cleaned_content = content.strip()
+        tags_set = set([t.strip().lower() for t in (tags or []) if t.strip()])
+
+        # Automatic tag and category enrichment
+        if auto_enrich:
+            extracted_tags = SmartExtractor.extract_tags(cleaned_content)
+            tags_set.update(extracted_tags)
+            if category.lower() == "general":
+                category = SmartExtractor.infer_category(cleaned_content, default="general")
+
         metadata = metadata or {}
         item_id = memory_id or f"mem_{uuid.uuid4().hex[:10]}"
 
         item = MemoryItem(
             id=item_id,
-            content=content.strip(),
+            content=cleaned_content,
             category=category.strip().lower(),
-            tags=[t.strip().lower() for t in tags if t.strip()],
+            tags=sorted(list(tags_set)),
             importance=max(0.0, min(1.0, importance)),
             created_at=datetime.now(timezone.utc),
             metadata=metadata,

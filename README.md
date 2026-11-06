@@ -80,6 +80,13 @@ synapse prompt "Write an API route"
 synapse list --limit 10
 ```
 
+### Launch Interactive Web Dashboard (`ui`)
+Launch the local dark-mode UI with visual memory cards and live recall testing:
+```bash
+synapse ui
+# Opens http://127.0.0.1:8484
+```
+
 ### Forget / Delete Memory (`forget`)
 ```bash
 synapse forget mem_7f09dc09

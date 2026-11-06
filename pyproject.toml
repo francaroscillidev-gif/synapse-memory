@@ -1,0 +1,31 @@
+[project]
+name = "synapse-memory"
+version = "0.1.0"
+description = "Open source, local-first long-term memory engine for AI agents and humans via MCP"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [
+    { name = "franca roscilli", email = "franca.roscilli@ymail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "fastembed>=0.9.1",
+    "mcp>=2.3.0",
+    "numpy>=2.5.4",
+    "pydantic>=2.14.3",
+    "rich>=15.0.0",
+    "typer>=0.28.0",
+]
+
+[project.scripts]
+synapse = "synapse_memory.cli:main"
+synapse-memory = "synapse_memory.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]

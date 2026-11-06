@@ -10,6 +10,7 @@ from synapse_memory.embedder import LocalEmbedder
 from synapse_memory.evolver import MemoryEvolver
 from synapse_memory.extractor import SmartExtractor
 from synapse_memory.models import MemoryItem, SearchResult
+from synapse_memory.security import SecurityRedactor
 from synapse_memory.storage import StorageManager
 
 
@@ -29,12 +30,16 @@ class MemoryEngine:
         memory_id: Optional[str] = None,
         auto_enrich: bool = True,
         auto_evolve: bool = True,
+        redact_secrets: bool = True,
     ) -> Tuple[MemoryItem, List[MemoryItem]]:
         """
         Store a new fact, rule, or observation into local memory.
         Returns (created_item, list_of_superseded_items).
         """
         cleaned_content = content.strip()
+        redactions_count = 0
+        if redact_secrets:
+            cleaned_content, redactions_count = SecurityRedactor.redact(cleaned_content)
         tags_set = set([t.strip().lower() for t in (tags or []) if t.strip()])
 
         # Automatic tag and category enrichment
@@ -45,6 +50,8 @@ class MemoryEngine:
                 category = SmartExtractor.infer_category(cleaned_content, default="general")
 
         metadata = metadata or {}
+        if redactions_count > 0:
+            metadata["security_redacted"] = redactions_count
         item_id = memory_id or f"mem_{uuid.uuid4().hex[:10]}"
 
         item = MemoryItem(

@@ -265,6 +265,83 @@ def watch_directory(
     watcher.start_watching(interval_seconds=interval, on_change=on_change)
 
 
+@app.command(name="setup")
+def setup_client(
+    target: str = typer.Argument(..., help="Client to configure: 'claude' or 'cursor'"),
+):
+    """1-Click MCP Setup for Claude Desktop or Cursor."""
+    from synapse_memory.installer import ClientInstaller
+
+    target_clean = target.strip().lower()
+    if target_clean in ["claude", "claude-desktop"]:
+        success, path_or_err = ClientInstaller.setup_claude()
+        if success:
+            console.print(f"[bold green]✔ Configured Claude Desktop MCP at:[/bold green] {path_or_err}")
+            console.print("[dim]Restart Claude Desktop to activate Synapse Memory tools.[/dim]")
+        else:
+            console.print(f"[bold red]✘ Failed to configure Claude Desktop:[/bold red] {path_or_err}")
+    elif target_clean == "cursor":
+        success, path_or_err = ClientInstaller.setup_cursor()
+        if success:
+            console.print(f"[bold green]✔ Configured Cursor MCP at:[/bold green] {path_or_err}")
+            console.print("[dim]Restart Cursor to activate Synapse Memory tools.[/dim]")
+        else:
+            console.print(f"[bold red]✘ Failed to configure Cursor:[/bold red] {path_or_err}")
+    else:
+        console.print(f"[bold red]Unknown target '{target}'. Use 'claude' or 'cursor'.[/bold red]")
+
+
+@app.command(name="stats")
+def show_stats():
+    """Display analytics and health metrics for your memory store."""
+    stats = engine.storage.get_analytics()
+    table = Table(title="🧠 Synapse Memory Stats", border_style="cyan")
+    table.add_column("Metric", style="bold yellow")
+    table.add_column("Value", style="green")
+
+    table.add_row("Total Memories", str(stats["total_memories"]))
+    table.add_row("Active Memories", str(stats["active_memories"]))
+    table.add_row("Superseded / Stale", str(stats["superseded_memories"]))
+
+    console.print(table)
+
+    if stats["categories"]:
+        cat_table = Table(title="📁 Categories Breakdown", border_style="magenta")
+        cat_table.add_column("Category", style="cyan")
+        cat_table.add_column("Count", style="white")
+        for cat, count in stats["categories"].items():
+            cat_table.add_row(cat, str(count))
+        console.print(cat_table)
+
+
+@app.command(name="prune")
+def prune_superseded():
+    """Permanently delete inactive / superseded memories (Garbage Collection)."""
+    count = engine.storage.prune_superseded()
+    if count > 0:
+        console.print(f"[bold green]✔ Pruned {count} stale/superseded memories from database.[/bold green]")
+    else:
+        console.print("[dim]Memory store is clean: no stale memories found.[/dim]")
+
+
+@app.command(name="consolidate")
+def consolidate(
+    category: str = typer.Argument(..., help="Category to consolidate into structured summary"),
+    model: str = typer.Option("qwen2.5:1.5b", "--model", "-m", help="Local Ollama model if available"),
+):
+    """Synthesize scattered memory fragments within a category into a structured summary."""
+    from synapse_memory.consolidator import MemoryConsolidator
+
+    consolidator = MemoryConsolidator(engine)
+    with console.status(f"[bold cyan]Consolidating memories for '{category}'...[/bold cyan]"):
+        summary = consolidator.consolidate_category(category=category, model=model)
+
+    if not summary:
+        console.print(f"[yellow]Not enough memories in '{category}' to consolidate (minimum 2 needed).[/yellow]")
+    else:
+        console.print(Panel(summary, title=f"🧠 Consolidated Summary: {category.upper()}", border_style="green"))
+
+
 def main():
     app()
 

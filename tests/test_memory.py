@@ -149,3 +149,59 @@ def test_web_app_endpoints():
     assert r.status_code == 200
     assert "nodes" in r.json()
     assert "links" in r.json()
+
+    # Check analytics API
+    r = client.get("/api/analytics")
+    assert r.status_code == 200
+    assert "total_memories" in r.json()
+
+
+def test_security_redaction(temp_engine):
+    raw_content = "Connect to API using secret key sk-proj-1234567890abcdef1234567890abcdef12345678 and password=SuperSecretPassword123"
+    item, _ = temp_engine.store(content=raw_content, category="credentials")
+
+    # Verify secrets were redacted before storage
+    assert "sk-proj-1234567890abcdef" not in item.content
+    assert "[REDACTED_API_KEY]" in item.content
+    assert "[REDACTED_SECRET]" in item.content
+    assert item.metadata.get("security_redacted", 0) >= 1
+
+
+def test_storage_analytics_and_pruning(temp_engine):
+    # Store old rule then supersede it
+    temp_engine.store(content="Use JavaScript for scripting", category="rule")
+    temp_engine.store(content="Ora è Python invece di JavaScript per lo scripting", category="rule")
+
+    stats = temp_engine.storage.get_analytics()
+    assert stats["total_memories"] == 2
+    assert stats["active_memories"] == 1
+    assert stats["superseded_memories"] == 1
+
+    # Prune
+    pruned = temp_engine.storage.prune_superseded()
+    assert pruned == 1
+
+    stats_after = temp_engine.storage.get_analytics()
+    assert stats_after["total_memories"] == 1
+    assert stats_after["superseded_memories"] == 0
+
+
+def test_client_installer(tmp_path):
+    from synapse_memory.installer import ClientInstaller
+
+    # Mock cursor config
+    success, config_path = ClientInstaller.setup_cursor(workspace_path=tmp_path)
+    assert success is True
+    assert Path(config_path).exists()
+
+
+def test_consolidator(temp_engine):
+    from synapse_memory.consolidator import MemoryConsolidator
+
+    temp_engine.store(content="Python is great for AI", category="tech")
+    temp_engine.store(content="FastAPI is great for web APIs", category="tech")
+
+    consolidator = MemoryConsolidator(temp_engine)
+    summary = consolidator.consolidate_category("tech", store_as_memory=True)
+    assert summary is not None
+    assert "Python" in summary or "FastAPI" in summary

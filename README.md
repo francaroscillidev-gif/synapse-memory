@@ -24,7 +24,10 @@ Most modern AI agents suffer from **"Context Amnesia"**: they lose personal pref
 4. **Token Budget Compressor:** Compresses recalled knowledge to strictly respect context window limits.
 5. **Real-Time Directory Watcher:** Watches note folders or repositories and auto-syncs modified files into memory using SHA256 diffing.
 6. **Universal MCP Server:** Integrates natively with any Model Context Protocol (MCP) host, such as **Claude Desktop**, **Cursor**, **Antigravity**, or custom agent loops.
-7. **Instant Terminal CLI & Web Graph Dashboard:** Rich CLI + real-time force-directed interactive knowledge graph.
+7. **Automatic PII & Secrets Redaction:** Scans and sanitizes API keys (`sk-...`, `ghp_...`), JWTs, AWS credentials, and passwords before indexing to avoid leaks.
+8. **1-Click MCP Setup:** Automated auto-injection for Claude Desktop and Cursor.
+9. **Memory Health & Consolidation:** Live analytics, garbage collection, and local Ollama-powered knowledge synthesis.
+10. **Instant Terminal CLI & Web Graph Dashboard:** Rich CLI + real-time force-directed interactive knowledge graph.
 
 ---
 
@@ -104,6 +107,31 @@ synapse export --out notes.md
 
 # Restore / merge from backup
 synapse import backup.json
+```
+
+### 1-Click MCP Setup for Claude & Cursor (`setup`)
+Configure Claude Desktop or Cursor automatically with a single command:
+```bash
+# Configure Claude Desktop
+synapse setup claude
+
+# Configure Cursor IDE
+synapse setup cursor
+```
+
+### Memory Health, Stats & Garbage Collection (`stats` / `prune`)
+```bash
+# Inspect health metrics and category counts
+synapse stats
+
+# Permanently prune stale/superseded memories
+synapse prune
+```
+
+### Consolidate Scattered Fragments (`consolidate`)
+Synthesize memories within a category into a structured macro-summary (supports local Ollama):
+```bash
+synapse consolidate architecture
 ```
 
 ### Launch Interactive Web Dashboard & Knowledge Graph (`ui`)

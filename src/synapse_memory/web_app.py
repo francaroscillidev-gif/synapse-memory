@@ -109,6 +109,7 @@ HTML_DASHBOARD = """<!DOCTYPE html>
             <div class="flex space-x-2">
               <button onclick="switchTab('feed')" id="tabFeed" class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-cyan-950 text-cyan-300 border border-cyan-800">List View</button>
               <button onclick="switchTab('graph')" id="tabGraph" class="px-3 py-1.5 text-xs font-semibold rounded-lg text-gray-400 hover:text-white">Knowledge Graph</button>
+              <button onclick="switchTab('analytics')" id="tabAnalytics" class="px-3 py-1.5 text-xs font-semibold rounded-lg text-gray-400 hover:text-white">Analytics & Health</button>
             </div>
             <span id="memCount" class="text-xs text-gray-400">Loading...</span>
           </div>
@@ -123,6 +124,39 @@ HTML_DASHBOARD = """<!DOCTYPE html>
               <span class="text-cyan-400 font-mono">Drag nodes to explore</span>
             </div>
             <canvas id="graphCanvas" width="650" height="450" class="w-full rounded-xl bg-gray-950/90 border border-gray-800 cursor-grab"></canvas>
+          </div>
+
+          <!-- Analytics View -->
+          <div id="analyticsView" class="hidden space-y-4">
+            <div class="grid grid-cols-3 gap-3">
+              <div class="p-3.5 rounded-xl bg-gray-900/60 border border-gray-800 text-center">
+                <div class="text-xs text-gray-400">Total Memories</div>
+                <div id="statTotal" class="text-2xl font-bold text-white mt-1">0</div>
+              </div>
+              <div class="p-3.5 rounded-xl bg-gray-900/60 border border-gray-800 text-center">
+                <div class="text-xs text-emerald-400">Active Memories</div>
+                <div id="statActive" class="text-2xl font-bold text-emerald-300 mt-1">0</div>
+              </div>
+              <div class="p-3.5 rounded-xl bg-gray-900/60 border border-gray-800 text-center">
+                <div class="text-xs text-amber-400">Superseded (Stale)</div>
+                <div id="statSuperseded" class="text-2xl font-bold text-amber-300 mt-1">0</div>
+              </div>
+            </div>
+
+            <div class="p-4 rounded-xl bg-gray-900/60 border border-gray-800 space-y-3">
+              <h3 class="text-xs font-bold uppercase tracking-wider text-gray-400">Category Distribution</h3>
+              <div id="categoriesList" class="space-y-1.5 text-xs"></div>
+            </div>
+
+            <div class="p-4 rounded-xl bg-gray-900/60 border border-gray-800 flex items-center justify-between">
+              <div>
+                <h4 class="text-sm font-semibold text-gray-200">Memory Garbage Collection</h4>
+                <p class="text-xs text-gray-400 mt-0.5">Permanently remove inactive or superseded memories to optimize storage.</p>
+              </div>
+              <button onclick="runPrune()" class="px-3.5 py-2 text-xs font-semibold rounded-lg bg-red-950/80 hover:bg-red-900 text-red-300 border border-red-800 transition">
+                🧹 Prune Stale
+              </button>
+            </div>
           </div>
 
         </div>
@@ -250,21 +284,61 @@ HTML_DASHBOARD = """<!DOCTYPE html>
     function switchTab(tab) {
       const feedView = document.getElementById('feedView');
       const graphView = document.getElementById('graphView');
+      const analyticsView = document.getElementById('analyticsView');
       const tabFeed = document.getElementById('tabFeed');
       const tabGraph = document.getElementById('tabGraph');
+      const tabAnalytics = document.getElementById('tabAnalytics');
+
+      feedView.classList.add('hidden');
+      graphView.classList.add('hidden');
+      analyticsView.classList.add('hidden');
+
+      tabFeed.className = "px-3 py-1.5 text-xs font-semibold rounded-lg text-gray-400 hover:text-white";
+      tabGraph.className = "px-3 py-1.5 text-xs font-semibold rounded-lg text-gray-400 hover:text-white";
+      tabAnalytics.className = "px-3 py-1.5 text-xs font-semibold rounded-lg text-gray-400 hover:text-white";
 
       if (tab === 'feed') {
         feedView.classList.remove('hidden');
-        graphView.classList.add('hidden');
         tabFeed.className = "px-3 py-1.5 text-xs font-semibold rounded-lg bg-cyan-950 text-cyan-300 border border-cyan-800";
-        tabGraph.className = "px-3 py-1.5 text-xs font-semibold rounded-lg text-gray-400 hover:text-white";
-      } else {
-        feedView.classList.add('hidden');
+      } else if (tab === 'graph') {
         graphView.classList.remove('hidden');
         tabGraph.className = "px-3 py-1.5 text-xs font-semibold rounded-lg bg-cyan-950 text-cyan-300 border border-cyan-800";
-        tabFeed.className = "px-3 py-1.5 text-xs font-semibold rounded-lg text-gray-400 hover:text-white";
         initGraph();
+      } else if (tab === 'analytics') {
+        analyticsView.classList.remove('hidden');
+        tabAnalytics.className = "px-3 py-1.5 text-xs font-semibold rounded-lg bg-cyan-950 text-cyan-300 border border-cyan-800";
+        loadAnalytics();
       }
+    }
+
+    async function loadAnalytics() {
+      const res = await fetch('/api/analytics');
+      const data = await res.json();
+      document.getElementById('statTotal').textContent = data.total_memories;
+      document.getElementById('statActive').textContent = data.active_memories;
+      document.getElementById('statSuperseded').textContent = data.superseded_memories;
+
+      const catList = document.getElementById('categoriesList');
+      const entries = Object.entries(data.categories || {});
+      if (!entries.length) {
+        catList.innerHTML = '<span class="text-gray-500">No categories recorded yet.</span>';
+      } else {
+        catList.innerHTML = entries.map(([cat, count]) => `
+          <div class="flex items-center justify-between py-1 border-b border-gray-800/60">
+            <span class="text-gray-300 font-medium capitalize">${escapeHtml(cat)}</span>
+            <span class="px-2 py-0.5 rounded bg-gray-800 text-cyan-300 font-mono text-[11px]">${count}</span>
+          </div>
+        `).join('');
+      }
+    }
+
+    async function runPrune() {
+      if (!confirm('Permanently delete all superseded (stale) memories? This cannot be undone.')) return;
+      const res = await fetch('/api/prune', { method: 'POST' });
+      const data = await res.json();
+      alert(`Garbage collection finished: pruned ${data.pruned_count} stale memory item(s).`);
+      await loadAnalytics();
+      await fetchMemories();
     }
 
     function refreshAll() {
@@ -517,6 +591,16 @@ async def api_graph_data(request):
     return JSONResponse({"nodes": nodes, "links": links})
 
 
+async def api_analytics(request):
+    data = engine.storage.get_analytics()
+    return JSONResponse(data)
+
+
+async def api_prune(request):
+    count = engine.storage.prune_superseded()
+    return JSONResponse({"status": "ok", "pruned_count": count})
+
+
 routes = [
     Route("/", endpoint=get_dashboard, methods=["GET"]),
     Route("/api/memories", endpoint=api_list_memories, methods=["GET"]),
@@ -525,6 +609,8 @@ routes = [
     Route("/api/memories/{id}", endpoint=api_delete_memory, methods=["DELETE"]),
     Route("/api/prompt", endpoint=api_prompt_context, methods=["POST"]),
     Route("/api/graph", endpoint=api_graph_data, methods=["GET"]),
+    Route("/api/analytics", endpoint=api_analytics, methods=["GET"]),
+    Route("/api/prune", endpoint=api_prune, methods=["POST"]),
 ]
 
 app = Starlette(debug=True, routes=routes)

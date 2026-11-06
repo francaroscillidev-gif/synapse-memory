@@ -2,7 +2,7 @@ import json
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from synapse_memory.models import MemoryItem
@@ -130,6 +130,48 @@ class StorageManager:
             )
             conn.commit()
             return cur.rowcount > 0
+
+    def prune_superseded(self) -> int:
+        """Permanently delete all inactive/superseded memories (garbage collection)."""
+        with self._get_connection() as conn:
+            cur = conn.execute("SELECT id FROM memories WHERE is_active = 0")
+            ids_to_delete = [r["id"] for r in cur.fetchall()]
+            if not ids_to_delete:
+                return 0
+
+            placeholders = ",".join("?" for _ in ids_to_delete)
+            conn.execute(f"DELETE FROM memory_embeddings WHERE memory_id IN ({placeholders})", ids_to_delete)
+            conn.execute(f"DELETE FROM memories WHERE id IN ({placeholders})", ids_to_delete)
+            conn.commit()
+            return len(ids_to_delete)
+
+    def get_analytics(self) -> Dict[str, Any]:
+        """Aggregate statistical metrics for the analytics dashboard."""
+        with self._get_connection() as conn:
+            total = conn.execute("SELECT COUNT(*) as c FROM memories").fetchone()["c"]
+            active = conn.execute("SELECT COUNT(*) as c FROM memories WHERE is_active = 1").fetchone()["c"]
+            superseded = total - active
+
+            # Category breakdown
+            cur_cat = conn.execute("SELECT category, COUNT(*) as c FROM memories GROUP BY category ORDER BY c DESC")
+            categories = {r["category"]: r["c"] for r in cur_cat.fetchall()}
+
+            # Access stats
+            most_accessed_cur = conn.execute(
+                "SELECT id, content, access_count FROM memories WHERE access_count > 0 ORDER BY access_count DESC LIMIT 5"
+            )
+            most_accessed = [
+                {"id": r["id"], "content": r["content"][:40], "access_count": r["access_count"]}
+                for r in most_accessed_cur.fetchall()
+            ]
+
+            return {
+                "total_memories": total,
+                "active_memories": active,
+                "superseded_memories": superseded,
+                "categories": categories,
+                "most_accessed": most_accessed,
+            }
 
     def list_memories(self, limit: int = 50, category: Optional[str] = None, active_only: bool = True) -> List[MemoryItem]:
         with self._get_connection() as conn:

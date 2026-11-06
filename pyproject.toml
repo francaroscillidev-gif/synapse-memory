@@ -5,7 +5,7 @@ description = "Open source, local-first long-term memory engine for AI agents an
 readme = "README.md"
 license = { text = "MIT" }
 authors = [
-    { name = "franca roscilli", email = "franca.roscilli@ymail.com" }
+    { name = "franca roscilli", email = "francaroscillidev@gmail.com" }
 ]
 requires-python = ">=3.12"
 dependencies = [

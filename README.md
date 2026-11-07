@@ -15,17 +15,21 @@ Most modern AI agents suffer from **"Context Amnesia"**: they lose personal pref
 
 **Synapse** provides a **Local-First Episodic & Semantic Memory** with zero cloud leaks:
 
-1. **100% Private & Local:** Runs entirely on your local machine using embedded ONNX models (via FastEmbed) and SQLite. No API keys, no external database servers, no data leakage.
-2. **Hybrid Cognitive Search:** Combines dense ONNX vector cosine distance with sparse SQLite FTS5 (BM25) full-text indexing, recency decay, and explicit importance ranking.
-3. **Multi-Workspace Namespacing:** Isolate memories by project, domain, or agent (e.g. `--workspace mobile`, `--workspace backend`).
-4. **Official Web Browser Extension (MV3):** Highlight text or code anywhere on the web to clip it directly into your local Synapse memory.
-5. **Memory Evolution & Self-Correction:** Automatically detects when a new memory contradicts or supersedes an older rule (e.g. *"switched from Postgres to CockroachDB"*), deprecating the outdated memory to eliminate AI hallucination.
-6. **Token Budget Compressor:** Compresses recalled knowledge to strictly respect context window limits.
-7. **Real-Time Directory Watcher:** Watches note folders or repositories and auto-syncs modified files into memory using SHA256 diffing.
-8. **Universal MCP Server:** Integrates natively with any Model Context Protocol (MCP) host, such as **Claude Desktop**, **Cursor**, **Antigravity**, or custom agent loops.
-9. **Automatic PII & Secrets Redaction:** Scans and sanitizes API keys (`sk-...`, `ghp_...`), JWTs, AWS credentials, and passwords before indexing to avoid leaks.
-10. **1-Click MCP Setup:** Automated auto-injection for Claude Desktop and Cursor.
-11. **Instant Terminal CLI & Web Graph Dashboard:** Rich CLI + real-time force-directed interactive knowledge graph.
+1. **100% Private & Local-First:** Runs entirely on your machine using embedded ONNX models (via FastEmbed) and SQLite. Zero external database servers, zero cloud leaks.
+2. **Multi-Tier Cognitive Architecture:** Divided into **Working Memory** (short-term buffer with automatic TTL expiry), **Episodic Memory** (chronological event stream), and **Semantic Memory** (immutable core rules).
+3. **Hybrid Cognitive Search:** Combines dense ONNX vector cosine distance with sparse SQLite FTS5 (BM25) full-text indexing, recency decay, and explicit importance ranking.
+4. **AES-256-GCM Encryption at Rest:** Optional zero-knowledge encryption on disk with PBKDF2 key derivation (`SYNAPSE_ENCRYPTION_KEY`).
+5. **Decentralized Remote Sync:** Multi-device encrypted sync via private Git remotes (`synapse remote push / pull`).
+6. **Multi-Workspace Namespacing:** Isolate memories by project, domain, or agent (e.g. `--workspace mobile`, `--workspace backend`).
+7. **Official Web Browser Extension (MV3):** Highlight text or code anywhere on the web to clip it directly into your local Synapse memory.
+8. **Memory Evolution & Self-Correction:** Automatically detects when a new memory contradicts or supersedes an older rule, deprecating outdated facts to eliminate AI hallucination.
+9. **Obsidian Graph & Wikilinks Export:** Export memories directly into an interconnected Obsidian Vault with bidirectional `[[wikilinks]]`.
+10. **Token Budget Compressor:** Compresses recalled knowledge to strictly respect context window limits.
+11. **Real-Time Directory Watcher:** Auto-syncs note folders or repositories into memory using SHA256 diffing.
+12. **Universal MCP Server:** Integrates natively with any Model Context Protocol (MCP) host, such as **Claude Desktop**, **Cursor**, **Antigravity**, or custom agent loops.
+13. **Automatic PII & Secrets Redaction:** Scans and sanitizes API keys, JWTs, AWS credentials, and passwords before indexing.
+14. **1-Click MCP Setup:** Automated auto-injection for Claude Desktop and Cursor.
+15. **Instant Terminal CLI & Web Graph Dashboard:** Rich CLI + real-time force-directed interactive knowledge graph.
 
 ---
 
@@ -52,14 +56,27 @@ pip install -e .
 
 ### Store a memory (`remember`)
 ```bash
-# Store in default workspace
-synapse remember "We use PostgreSQL for all production database schemas" \
-  --category architecture \
-  --tag postgres --tag database \
-  --importance 0.9
+# Permanent Semantic Memory (core rules)
+synapse remember "Never commit API keys or passwords to git" --tier semantic --importance 1.0
+
+# Working Memory with auto-expiry (e.g. 30-minute session buffer)
+synapse remember "Debugging production outage on auth-cluster" --tier working --ttl 1800
 
 # Store in a dedicated workspace
 synapse remember "iOS app uses SwiftUI and SwiftData" --workspace mobile-team
+```
+
+### Decentralized Cross-Device Sync (`remote`)
+Sync memories across machines using a private Git repository:
+```bash
+# Initialize sync linked to your private repository
+synapse remote init git@github.com:your-username/my-private-synapse-vault.git
+
+# Push encrypted updates
+synapse remote push -m "Synced memory from MacBook"
+
+# Pull and merge updates on another machine
+synapse remote pull
 ```
 
 ### Natural Language Search (`recall`)

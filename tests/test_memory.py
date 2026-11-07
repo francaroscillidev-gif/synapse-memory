@@ -1,6 +1,7 @@
 import tempfile
 import time
 from pathlib import Path
+import numpy as np
 import pytest
 from starlette.testclient import TestClient
 
@@ -279,3 +280,75 @@ def test_api_workspaces_endpoint():
     r = client.get("/api/workspaces")
     assert r.status_code == 200
     assert isinstance(r.json(), list)
+
+
+def test_multi_tier_and_ttl_expiration(temp_engine):
+    # Store semantic core rule (permanent)
+    sem_item, _ = temp_engine.store(content="Always obey user safety limits", tier="semantic", importance=1.0)
+    assert sem_item.tier == "semantic"
+    assert sem_item.expires_at is None
+
+    # Store working buffer memory with immediate 1-second TTL
+    work_item, _ = temp_engine.store(content="Temporary session note", tier="working", ttl_seconds=1)
+    assert work_item.tier == "working"
+    assert work_item.expires_at is not None
+
+    # Recalling immediately should find it
+    assert len(temp_engine.recall("Temporary session note", tier="working")) > 0
+
+    # Wait for TTL to expire
+    time.sleep(1.2)
+    expired_count = temp_engine.storage.prune_expired()
+    assert expired_count >= 1
+
+    # Now it should be gone from storage
+    assert temp_engine.storage.get_memory(work_item.id) is None
+
+
+def test_aes_gcm_encryption_at_rest(tmp_path):
+    from synapse_memory.crypto import CryptoManager
+    from synapse_memory.storage import StorageManager
+
+    key = "super_secure_passphrase_for_testing"
+    crypto = CryptoManager(passphrase=key)
+    ciphertext = crypto.encrypt("Highly sensitive medical or financial data")
+    assert ciphertext.startswith("enc:v1:")
+    assert crypto.decrypt(ciphertext) == "Highly sensitive medical or financial data"
+
+    # Test encrypted storage
+    db_file = tmp_path / "encrypted.db"
+    enc_storage = StorageManager(db_path=db_file, encryption_key=key)
+    test_vec = np.zeros(384, dtype=np.float32)
+
+    from synapse_memory.models import MemoryItem
+    item = MemoryItem(id="enc_1", content="Top Secret Mission Alpha")
+    enc_storage.save_memory(item, test_vec)
+
+    # Read raw SQLite content directly from disk
+    import sqlite3
+    raw_conn = sqlite3.connect(db_file)
+    row = raw_conn.execute("SELECT content FROM memories WHERE id = 'enc_1'").fetchone()
+    raw_stored_text = row[0]
+    # The raw disk file must contain the ciphertext prefix, NOT the plaintext
+    assert raw_stored_text.startswith("enc:v1:")
+    assert "Top Secret Mission Alpha" not in raw_stored_text
+
+    # Read through encrypted storage -> transparently decrypted
+    reloaded = enc_storage.get_memory("enc_1")
+    assert reloaded.content == "Top Secret Mission Alpha"
+
+
+def test_vector_quantization_int8():
+    from synapse_memory.quantizer import VectorQuantizer
+
+    # Create dummy 384-dimensional unit vector
+    vec = np.random.randn(384).astype(np.float32)
+    vec = vec / np.linalg.norm(vec)
+
+    quant_bytes, scale, min_val = VectorQuantizer.quantize_to_int8(vec)
+    assert len(quant_bytes) == 384  # 1 byte per dimension (vs 1536 bytes in float32)
+
+    dequant = VectorQuantizer.dequantize_from_int8(quant_bytes, scale, min_val)
+    cosine_sim = VectorQuantizer.fast_cosine_similarity(vec, dequant)
+    # Quantization error should be minimal (similarity > 0.99)
+    assert cosine_sim > 0.99

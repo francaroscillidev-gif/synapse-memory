@@ -1,6 +1,6 @@
 import math
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -25,6 +25,8 @@ class MemoryEngine:
         content: str,
         category: str = "general",
         workspace: str = "default",
+        tier: str = "episodic",
+        ttl_seconds: Optional[int] = None,
         tags: Optional[List[str]] = None,
         importance: float = 0.5,
         metadata: Optional[dict] = None,
@@ -55,14 +57,24 @@ class MemoryEngine:
             metadata["security_redacted"] = redactions_count
         item_id = memory_id or f"mem_{uuid.uuid4().hex[:10]}"
 
+        # Calculate TTL expiration
+        expires_at = None
+        if ttl_seconds:
+            expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl_seconds)
+        elif tier == "working":
+            # Default 1 hour TTL for volatile working memory
+            expires_at = datetime.now(timezone.utc) + timedelta(seconds=3600)
+
         item = MemoryItem(
             id=item_id,
             content=cleaned_content,
             category=category.strip().lower(),
             workspace=workspace.strip().lower(),
+            tier=tier,
             tags=sorted(list(tags_set)),
             importance=max(0.0, min(1.0, importance)),
             created_at=datetime.now(timezone.utc),
+            expires_at=expires_at,
             metadata=metadata,
         )
 
@@ -70,7 +82,7 @@ class MemoryEngine:
 
         # Detect contradictions and supersede older memories if necessary
         superseded: List[MemoryItem] = []
-        if auto_evolve:
+        if auto_evolve and tier != "working":
             superseded = self.evolver.check_and_evolve(new_item=item, new_vector=vector)
 
         self.storage.save_memory(item, vector)
@@ -81,6 +93,7 @@ class MemoryEngine:
         query: str,
         category: Optional[str] = None,
         workspace: Optional[str] = None,
+        tier: Optional[str] = None,
         limit: int = 5,
         min_score: float = 0.25,
         sim_weight: float = 0.65,
@@ -95,7 +108,7 @@ class MemoryEngine:
         - Recency Decay (exponential half-life decay)
         - Explicit Importance
         """
-        all_entries = self.storage.get_all_vectors(category=category, workspace=workspace, active_only=active_only)
+        all_entries = self.storage.get_all_vectors(category=category, workspace=workspace, tier=tier, active_only=active_only)
         if not all_entries:
             return []
 

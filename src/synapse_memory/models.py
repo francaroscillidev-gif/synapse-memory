@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
+
+MemoryTier = Literal["working", "episodic", "semantic"]
 
 
 class MemoryItem(BaseModel):
@@ -8,10 +10,12 @@ class MemoryItem(BaseModel):
     content: str = Field(..., description="The textual content / fact / observation")
     category: str = Field(default="general", description="Category: e.g. preference, code, fact, decision, context")
     workspace: str = Field(default="default", description="Workspace namespace (e.g. default, work, personal)")
+    tier: MemoryTier = Field(default="episodic", description="Cognitive tier: working (short-term buffer), episodic (events), semantic (core rules)")
     tags: List[str] = Field(default_factory=list, description="Tags or entities linked to this memory")
     importance: float = Field(default=0.5, ge=0.0, le=1.0, description="Priority/importance of this memory (0.0 to 1.0)")
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     last_accessed_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = Field(default=None, description="Optional expiry timestamp for temporary working memory")
     access_count: int = 0
     is_active: bool = Field(default=True, description="Whether this memory is currently active or superseded")
     superseded_by: Optional[str] = Field(default=None, description="ID of memory that replaced this one")

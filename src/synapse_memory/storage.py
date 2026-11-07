@@ -5,15 +5,17 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
+from synapse_memory.crypto import CryptoManager
 from synapse_memory.models import MemoryItem
 
 DEFAULT_DB_PATH = Path.home() / ".synapse_memory" / "memories.db"
 
 
 class StorageManager:
-    def __init__(self, db_path: Optional[Path] = None):
+    def __init__(self, db_path: Optional[Path] = None, encryption_key: Optional[str] = None):
         self.db_path = db_path or DEFAULT_DB_PATH
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.crypto = CryptoManager(passphrase=encryption_key)
         self._init_db()
 
     def _get_connection(self) -> sqlite3.Connection:
@@ -30,10 +32,12 @@ class StorageManager:
                     content TEXT NOT NULL,
                     category TEXT NOT NULL,
                     workspace TEXT NOT NULL DEFAULT 'default',
+                    tier TEXT NOT NULL DEFAULT 'episodic',
                     tags TEXT NOT NULL,
                     importance REAL NOT NULL,
                     created_at TEXT NOT NULL,
                     last_accessed_at TEXT,
+                    expires_at TEXT,
                     access_count INTEGER NOT NULL DEFAULT 0,
                     is_active INTEGER NOT NULL DEFAULT 1,
                     superseded_by TEXT,
@@ -41,19 +45,18 @@ class StorageManager:
                 )
                 """
             )
-            # Safe schema migration for existing databases
-            try:
-                conn.execute("ALTER TABLE memories ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1")
-            except sqlite3.OperationalError:
-                pass
-            try:
-                conn.execute("ALTER TABLE memories ADD COLUMN superseded_by TEXT")
-            except sqlite3.OperationalError:
-                pass
-            try:
-                conn.execute("ALTER TABLE memories ADD COLUMN workspace TEXT NOT NULL DEFAULT 'default'")
-            except sqlite3.OperationalError:
-                pass
+            # Safe schema migrations for existing databases
+            for col, dtype, dflt in [
+                ("is_active", "INTEGER", "1"),
+                ("superseded_by", "TEXT", "NULL"),
+                ("workspace", "TEXT", "'default'"),
+                ("tier", "TEXT", "'episodic'"),
+                ("expires_at", "TEXT", "NULL"),
+            ]:
+                try:
+                    conn.execute(f"ALTER TABLE memories ADD COLUMN {col} {dtype} DEFAULT {dflt}")
+                except sqlite3.OperationalError:
+                    pass
 
             conn.execute(
                 """
@@ -67,6 +70,7 @@ class StorageManager:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_category ON memories(category);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_active ON memories(is_active);")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_workspace ON memories(workspace);")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_memories_tier ON memories(tier);")
 
             # Initialize FTS5 virtual table for lightning-fast BM25 keyword search
             try:
@@ -81,32 +85,37 @@ class StorageManager:
                     """
                 )
             except sqlite3.OperationalError:
-                # In case fts5 is unavailable on minimal environments
                 pass
 
             conn.commit()
 
     def save_memory(self, item: MemoryItem, vector: np.ndarray) -> None:
+        # Encrypt content and metadata if crypto is enabled
+        stored_content = self.crypto.encrypt(item.content)
+        stored_metadata = self.crypto.encrypt(json.dumps(item.metadata))
+
         with self._get_connection() as conn:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO memories 
-                (id, content, category, workspace, tags, importance, created_at, last_accessed_at, access_count, is_active, superseded_by, metadata)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (id, content, category, workspace, tier, tags, importance, created_at, last_accessed_at, expires_at, access_count, is_active, superseded_by, metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     item.id,
-                    item.content,
+                    stored_content,
                     item.category,
                     item.workspace,
+                    item.tier,
                     json.dumps(item.tags),
                     item.importance,
                     item.created_at.isoformat(),
                     item.last_accessed_at.isoformat() if item.last_accessed_at else None,
+                    item.expires_at.isoformat() if item.expires_at else None,
                     item.access_count,
                     1 if item.is_active else 0,
                     item.superseded_by,
-                    json.dumps(item.metadata),
+                    stored_metadata,
                 ),
             )
             conn.execute(
@@ -117,13 +126,14 @@ class StorageManager:
                 (item.id, vector.astype(np.float32).tobytes()),
             )
 
-            # Update FTS5 index
+            # Update FTS5 index (only if unencrypted for keyword search)
             try:
                 conn.execute("DELETE FROM memories_fts WHERE id = ?", (item.id,))
-                conn.execute(
-                    "INSERT INTO memories_fts (id, content, tags) VALUES (?, ?, ?)",
-                    (item.id, item.content, " ".join(item.tags)),
-                )
+                if not self.crypto.is_enabled:
+                    conn.execute(
+                        "INSERT INTO memories_fts (id, content, tags) VALUES (?, ?, ?)",
+                        (item.id, item.content, " ".join(item.tags)),
+                    )
             except sqlite3.OperationalError:
                 pass
 
@@ -186,9 +196,34 @@ class StorageManager:
             conn.commit()
             return len(ids_to_delete)
 
+    def prune_expired(self) -> int:
+        """Prune working memory items that have exceeded their TTL."""
+        now_iso = datetime.now(timezone.utc).isoformat()
+        with self._get_connection() as conn:
+            cur = conn.execute("SELECT id FROM memories WHERE expires_at IS NOT NULL AND expires_at < ?", (now_iso,))
+            ids = [r["id"] for r in cur.fetchall()]
+            if not ids:
+                return 0
+            placeholders = ",".join("?" for _ in ids)
+            conn.execute(f"DELETE FROM memory_embeddings WHERE memory_id IN ({placeholders})", ids)
+            conn.execute(f"DELETE FROM memories WHERE id IN ({placeholders})", ids)
+            try:
+                conn.execute(f"DELETE FROM memories_fts WHERE id IN ({placeholders})", ids)
+            except sqlite3.OperationalError:
+                pass
+            conn.commit()
+            return len(ids)
+
     def list_memories(
-        self, limit: int = 50, category: Optional[str] = None, workspace: Optional[str] = None, active_only: bool = True
+        self,
+        limit: int = 50,
+        category: Optional[str] = None,
+        workspace: Optional[str] = None,
+        tier: Optional[str] = None,
+        active_only: bool = True,
     ) -> List[MemoryItem]:
+        # Auto-prune expired working memory
+        self.prune_expired()
         with self._get_connection() as conn:
             query = "SELECT * FROM memories"
             clauses = []
@@ -202,6 +237,9 @@ class StorageManager:
             if workspace:
                 clauses.append("workspace = ?")
                 params.append(workspace)
+            if tier:
+                clauses.append("tier = ?")
+                params.append(tier)
 
             if clauses:
                 query += " WHERE " + " AND ".join(clauses)
@@ -220,7 +258,8 @@ class StorageManager:
 
     def search_fts_ids(self, query_text: str, workspace: Optional[str] = None, limit: int = 20) -> List[str]:
         """Execute BM25 keyword search using FTS5 virtual table."""
-        # Clean query for FTS syntax
+        if self.crypto.is_enabled:
+            return []  # FTS is disabled when zero-knowledge encryption is on
         cleaned_words = [w for w in query_text.replace('"', ' ').replace("'", " ").split() if len(w) > 1]
         if not cleaned_words:
             return []
@@ -245,13 +284,18 @@ class StorageManager:
                 cur = conn.execute(query, params)
                 return [r["id"] for r in cur.fetchall()]
             except sqlite3.OperationalError:
-                # Fallback if FTS table is empty or error
                 return []
 
     def get_all_vectors(
-        self, category: Optional[str] = None, workspace: Optional[str] = None, active_only: bool = True
+        self,
+        category: Optional[str] = None,
+        workspace: Optional[str] = None,
+        tier: Optional[str] = None,
+        active_only: bool = True,
     ) -> List[Tuple[MemoryItem, np.ndarray]]:
         """Fetch memories and their embeddings for ranking calculations."""
+        # Auto-prune expired items
+        self.prune_expired()
         with self._get_connection() as conn:
             query = """
                 SELECT m.*, e.embedding 
@@ -269,6 +313,9 @@ class StorageManager:
             if workspace:
                 clauses.append("m.workspace = ?")
                 params.append(workspace)
+            if tier:
+                clauses.append("m.tier = ?")
+                params.append(tier)
 
             if clauses:
                 query += " WHERE " + " AND ".join(clauses)
@@ -307,6 +354,13 @@ class StorageManager:
             active = conn.execute(f"SELECT COUNT(*) as c FROM memories{active_clause}", params_ws).fetchone()["c"]
             superseded = total - active
 
+            # Tiers breakdown
+            cur_tier = conn.execute(
+                f"SELECT tier, COUNT(*) as c FROM memories{where_ws} GROUP BY tier",
+                params_ws,
+            )
+            tiers = {r["tier"]: r["c"] for r in cur_tier.fetchall()}
+
             # Category breakdown
             cur_cat = conn.execute(
                 f"SELECT category, COUNT(*) as c FROM memories{where_ws} GROUP BY category ORDER BY c DESC",
@@ -318,23 +372,25 @@ class StorageManager:
             cur_ws = conn.execute("SELECT workspace, COUNT(*) as c FROM memories GROUP BY workspace")
             workspaces = {r["workspace"]: r["c"] for r in cur_ws.fetchall()}
 
-            # Access stats
+            # Most accessed
             most_accessed_cur = conn.execute(
                 f"SELECT id, content, access_count FROM memories{where_ws} ORDER BY access_count DESC LIMIT 5",
                 params_ws,
             )
-            most_accessed = [
-                {"id": r["id"], "content": r["content"][:40], "access_count": r["access_count"]}
-                for r in most_accessed_cur.fetchall()
-            ]
+            most_accessed = []
+            for r in most_accessed_cur.fetchall():
+                decrypted_content = self.crypto.decrypt(r["content"])
+                most_accessed.append({"id": r["id"], "content": decrypted_content[:40], "access_count": r["access_count"]})
 
             return {
                 "total_memories": total,
                 "active_memories": active,
                 "superseded_memories": superseded,
+                "tiers": tiers,
                 "categories": categories,
                 "workspaces": workspaces,
                 "most_accessed": most_accessed,
+                "encryption_enabled": self.crypto.is_enabled,
             }
 
     def _row_to_memory(self, row: sqlite3.Row) -> MemoryItem:
@@ -342,18 +398,33 @@ class StorageManager:
         is_active = bool(row["is_active"]) if "is_active" in keys else True
         superseded_by = row["superseded_by"] if "superseded_by" in keys else None
         workspace = row["workspace"] if "workspace" in keys else "default"
+        tier = row["tier"] if "tier" in keys else "episodic"
+        expires_at = datetime.fromisoformat(row["expires_at"]) if ("expires_at" in keys and row["expires_at"]) else None
+
+        # Transparent Decryption
+        raw_content = row["content"]
+        raw_metadata = row["metadata"]
+        decrypted_content = self.crypto.decrypt(raw_content)
+        decrypted_metadata_str = self.crypto.decrypt(raw_metadata)
+
+        try:
+            metadata = json.loads(decrypted_metadata_str)
+        except Exception:
+            metadata = {}
 
         return MemoryItem(
             id=row["id"],
-            content=row["content"],
+            content=decrypted_content,
             category=row["category"],
             workspace=workspace,
+            tier=tier,
             tags=json.loads(row["tags"]),
             importance=float(row["importance"]),
             created_at=datetime.fromisoformat(row["created_at"]),
             last_accessed_at=datetime.fromisoformat(row["last_accessed_at"]) if row["last_accessed_at"] else None,
+            expires_at=expires_at,
             access_count=int(row["access_count"]),
             is_active=is_active,
             superseded_by=superseded_by,
-            metadata=json.loads(row["metadata"]),
+            metadata=metadata,
         )

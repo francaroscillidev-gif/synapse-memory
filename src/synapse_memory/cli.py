@@ -22,6 +22,8 @@ def remember(
     content: str = typer.Argument(..., help="The fact, note, or observation to remember"),
     category: str = typer.Option("general", "--category", "-c", help="Category (e.g. preference, code, fact)"),
     workspace: str = typer.Option("default", "--workspace", "-w", help="Workspace namespace (e.g. work, personal, mobile)"),
+    tier: str = typer.Option("episodic", "--tier", help="Cognitive tier: 'working' (short-term buffer), 'episodic' (events), 'semantic' (core beliefs)"),
+    ttl: Optional[int] = typer.Option(None, "--ttl", help="Time-to-live in seconds (useful for working memory)"),
     tags: Optional[List[str]] = typer.Option(None, "--tag", "-t", help="Tags/entities linked to this memory"),
     importance: float = typer.Option(0.5, "--importance", "-i", help="Importance score (0.0 to 1.0)"),
 ):
@@ -31,6 +33,8 @@ def remember(
             content=content,
             category=category,
             workspace=workspace,
+            tier=tier,
+            ttl_seconds=ttl,
             tags=tags or [],
             importance=importance,
         )
@@ -38,9 +42,11 @@ def remember(
     msg = (
         f"[bold green]✔ Memory Preserved![/bold green]\n"
         f"[bold]ID:[/bold] {item.id}\n"
+        f"[bold]Tier:[/bold] {item.tier}\n"
         f"[bold]Workspace:[/bold] {item.workspace}\n"
         f"[bold]Category:[/bold] {item.category}\n"
         f"[bold]Importance:[/bold] {item.importance}\n"
+        f"[bold]Expires:[/bold] {item.expires_at.strftime('%Y-%m-%d %H:%M:%S') if item.expires_at else 'Never'}\n"
         f"[bold]Tags:[/bold] {', '.join(item.tags) if item.tags else 'None'}\n"
         f"[bold]Content:[/bold] {item.content}"
     )
@@ -62,12 +68,13 @@ def recall(
     query: str = typer.Argument(..., help="Natural language query to search"),
     category: Optional[str] = typer.Option(None, "--category", "-c", help="Filter by category"),
     workspace: Optional[str] = typer.Option(None, "--workspace", "-w", help="Filter by workspace namespace"),
+    tier: Optional[str] = typer.Option(None, "--tier", help="Filter by memory tier ('working', 'episodic', 'semantic')"),
     limit: int = typer.Option(5, "--limit", "-l", help="Number of items to retrieve"),
     min_score: float = typer.Option(0.2, "--min-score", help="Minimum relevance score threshold"),
 ):
     """Retrieve relevant memories using hybrid ranking (Semantic + Recency + Importance)."""
     with console.status("[bold cyan]Searching synaptic connections...[/bold cyan]"):
-        results = engine.recall(query=query, category=category, workspace=workspace, limit=limit, min_score=min_score)
+        results = engine.recall(query=query, category=category, workspace=workspace, tier=tier, limit=limit, min_score=min_score)
 
     if not results:
         console.print(f"[yellow]No memories found for query:[/yellow] '{query}'")
@@ -76,6 +83,7 @@ def recall(
     table = Table(title=f"🧠 Synapse Recall: '{query}'" + (f" (Workspace: {workspace})" if workspace else ""), border_style="cyan")
     table.add_column("Rank", style="dim", width=4)
     table.add_column("ID", style="bold yellow", width=12)
+    table.add_column("Tier", style="cyan", width=9)
     table.add_column("Workspace", style="blue", width=10)
     table.add_column("Category", style="magenta", width=12)
     table.add_column("Score", style="bold green", width=8)
@@ -86,6 +94,7 @@ def recall(
         table.add_row(
             str(i),
             res.item.id,
+            res.item.tier,
             res.item.workspace,
             res.item.category,
             f"{res.final_score:.2f}",
@@ -115,15 +124,17 @@ def list_all(
     limit: int = typer.Option(20, "--limit", "-l", help="Number of memories to show"),
     category: Optional[str] = typer.Option(None, "--category", "-c", help="Filter by category"),
     workspace: Optional[str] = typer.Option(None, "--workspace", "-w", help="Filter by workspace"),
+    tier: Optional[str] = typer.Option(None, "--tier", help="Filter by memory tier ('working', 'episodic', 'semantic')"),
 ):
     """List recent memories stored in local SQLite database."""
-    items = engine.storage.list_memories(limit=limit, category=category, workspace=workspace)
+    items = engine.storage.list_memories(limit=limit, category=category, workspace=workspace, tier=tier)
     if not items:
         console.print("[yellow]Memory is currently empty. Use `synapse remember` to add some![/yellow]")
         return
 
     table = Table(title="🧠 Stored Memories", border_style="blue")
     table.add_column("ID", style="yellow", width=12)
+    table.add_column("Tier", style="cyan", width=9)
     table.add_column("Workspace", style="blue", width=10)
     table.add_column("Category", style="magenta", width=12)
     table.add_column("Importance", justify="right", width=10)
@@ -133,6 +144,7 @@ def list_all(
     for it in items:
         table.add_row(
             it.id,
+            it.tier,
             it.workspace,
             it.category,
             f"{it.importance:.2f}",
@@ -395,6 +407,55 @@ def shell_sync(
         console.print("[dim]Recall them anytime with: `synapse recall 'docker command' --workspace terminal`[/dim]")
     else:
         console.print("[yellow]No new or substantial shell commands found to index.[/yellow]")
+
+
+remote_app = typer.Typer(help="🌐 Decentralized cross-machine backup and sync via private Git remotes")
+app.add_typer(remote_app, name="remote")
+
+
+@remote_app.command(name="init")
+def remote_init(
+    git_url: str = typer.Argument(..., help="Remote git repository URL (e.g. git@github.com:user/my-vault.git)"),
+):
+    """Initialize a remote vault synchronization folder."""
+    from synapse_memory.remote_sync import RemoteSyncHub
+
+    hub = RemoteSyncHub(engine)
+    success, msg = hub.init_vault(git_url)
+    if success:
+        console.print(f"[bold green]✔ {msg}[/bold green]")
+    else:
+        console.print(f"[bold red]✘ {msg}[/bold red]")
+
+
+@remote_app.command(name="push")
+def remote_push(
+    message: Optional[str] = typer.Option(None, "--message", "-m", help="Custom commit message"),
+):
+    """Export current memory state and push to remote sync repository."""
+    from synapse_memory.remote_sync import RemoteSyncHub
+
+    hub = RemoteSyncHub(engine)
+    with console.status("[bold cyan]Syncing and pushing memories to remote vault...[/bold cyan]"):
+        success, msg = hub.push_sync(commit_message=message)
+    if success:
+        console.print(f"[bold green]✔ {msg}[/bold green]")
+    else:
+        console.print(f"[bold red]✘ {msg}[/bold red]")
+
+
+@remote_app.command(name="pull")
+def remote_pull():
+    """Pull latest memory state from remote repository and merge into local database."""
+    from synapse_memory.remote_sync import RemoteSyncHub
+
+    hub = RemoteSyncHub(engine)
+    with console.status("[bold cyan]Pulling memories from remote vault...[/bold cyan]"):
+        success, msg = hub.pull_sync()
+    if success:
+        console.print(f"[bold green]✔ {msg}[/bold green]")
+    else:
+        console.print(f"[bold red]✘ {msg}[/bold red]")
 
 
 def main():

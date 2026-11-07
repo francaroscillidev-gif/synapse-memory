@@ -1468,12 +1468,15 @@ name = "synapse-memory"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "cryptography" },
     { name = "fastembed" },
     { name = "mcp" },
     { name = "numpy" },
     { name = "pydantic" },
     { name = "rich" },
+    { name = "starlette" },
     { name = "typer" },
+    { name = "uvicorn" },
 ]
 
 [package.dev-dependencies]
@@ -1483,12 +1486,15 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cryptography", specifier = ">=42.0.0" },
     { name = "fastembed", specifier = ">=0.9.1" },
     { name = "mcp", specifier = ">=2.3.0" },
     { name = "numpy", specifier = ">=2.5.4" },
     { name = "pydantic", specifier = ">=2.14.3" },
     { name = "rich", specifier = ">=15.0.0" },
+    { name = "starlette", specifier = ">=0.36.0" },
     { name = "typer", specifier = ">=0.28.0" },
+    { name = "uvicorn", specifier = ">=0.28.0" },
 ]
 
 [package.metadata.requires-dev]

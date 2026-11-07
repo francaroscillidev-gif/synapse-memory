@@ -30,12 +30,23 @@ HTML_DASHBOARD = """<!DOCTYPE html>
     <!-- Header -->
     <header class="flex flex-col md:flex-row md:items-center justify-between pb-4 border-b border-gray-800 gap-4">
       <div>
-        <div class="flex items-center space-x-3">
-          <span class="text-3xl">🧠</span>
-          <h1 class="text-2xl md:text-3xl font-extrabold tracking-tight bg-gradient-to-r from-cyan-400 to-indigo-400 bg-clip-text text-transparent">Synapse Memory</h1>
-          <span class="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-cyan-950 text-cyan-300 border border-cyan-800">Local-First Engine</span>
+        <div class="flex items-center space-x-3.5">
+          <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-400 via-sky-500 to-indigo-600 p-[1.5px] shadow-lg shadow-cyan-500/20">
+            <div class="w-full h-full bg-[#0b0f19] rounded-[10px] flex items-center justify-center">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-cyan-400">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+              </svg>
+            </div>
+          </div>
+          <div>
+            <div class="flex items-center space-x-2.5">
+              <h1 class="text-2xl md:text-3xl font-extrabold tracking-tight bg-gradient-to-r from-cyan-400 via-sky-300 to-indigo-400 bg-clip-text text-transparent">Synapse Memory</h1>
+              <span class="px-2 py-0.5 text-[10px] font-bold rounded-full bg-cyan-950 text-cyan-300 border border-cyan-800 tracking-wide uppercase">Local-First</span>
+            </div>
+            <p class="text-xs text-gray-400 mt-0.5">Cognitive Long-Term Memory & Knowledge Graph for Autonomous Agents</p>
+          </div>
         </div>
-        <p class="text-sm text-gray-400 mt-1">Cognitive Long-Term Memory & Knowledge Graph for Autonomous Agents</p>
       </div>
       <div class="flex items-center space-x-3">
         <div class="flex items-center space-x-1.5">

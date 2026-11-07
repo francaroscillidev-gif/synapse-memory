@@ -1,11 +1,18 @@
-# 🧠 Synapse Memory
+<p align="center">
+  <img src="assets/synapse-banner.svg" alt="Synapse Memory Banner" width="100%">
+</p>
 
-> **Local-First, Open Source Long-Term Memory Engine for AI Agents & Humans**  
-> Powered by fast ONNX embeddings, SQLite persistence, and the Model Context Protocol (MCP).
+<p align="center">
+  <strong>Local-First, Open Source Long-Term Memory Engine for AI Agents & Humans</strong><br>
+  <em>Powered by ONNX Local Embeddings, SQLite FTS5 Hybrid Search, Multi-Tier Buffers &amp; Model Context Protocol (MCP)</em>
+</p>
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-green.svg)](https://modelcontextprotocol.io/)
+<p align="center">
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.12+-blue.svg" alt="Python 3.12+"></a>
+  <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-Compatible-green.svg" alt="MCP Compatible"></a>
+  <a href="#"><img src="https://img.shields.io/badge/Encryption-AES--256--GCM-red.svg" alt="AES-256-GCM"></a>
+</p>
 
 ---
 
